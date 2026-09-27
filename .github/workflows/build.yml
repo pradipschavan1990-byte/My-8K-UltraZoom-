@@ -10,16 +10,47 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-      - name: Create google-services.json with correct package
+      - name: Fix google-services.json
         run: |
-          echo '{"project_info":{"project_number":"123456789","project_id":"ultrazoom-8k"},"client":[{"client_info":{"mobilesdk_app_id":"1:123456789:android:abc123","package_name":"com.aistudio.ultrazoom8k.kxmv"},"oauth_client":[],"api_key":[{"current_key":"dummy_key"} Minu],"services":{"appinvite_service":{"other_platform_oauth_client":[]}}}],"configuration_version":"1"}' > app/google-services.json
+          rm -f app/google-services.json
+          cat > app/google-services.json << 'ENDOFFILE'
+          {
+            "project_info": {
+              "project_number": "1234567890",
+              "project_id": "ultrazoom-dummy",
+              "storage_bucket": "ultrazoom-dummy.appspot.com"
+            },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:1234567890:android:abcdef",
+                  "package_name": "com.aistudio.ultrazoom8k.kxmv"
+                },
+                "oauth_client": [],
+                "api_key": [
+                  {
+                    "current_key": "AIzaSyDummyKey123456789"
+                  }
+                ],
+                "services": {
+                  "appinvite_service": {
+                    "other_platform_oauth_client": []
+                  }
+                }
+              }
+            ],
+            "configuration_version": "1"
+          }
+          ENDOFFILE
+          echo "--- File Created ---"
           cat app/google-services.json
-      - name: Create debug keystore
+      - name: Create keystore
         run: |
           keytool -genkey -v -keystore app/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          keytool -genkey -v -keystore $HOME/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US" || true
+          mkdir -p $HOME/.android
+          cp app/debug.keystore $HOME/.android/debug.keystore || true
           keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-          ls -la app/debug.keystore
-          ls -la debug.keystore
       - name: Setup Gradle
         uses: gradle/gradle-build-action@v3
       - name: Build Debug APK
@@ -28,4 +59,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: 8K-UltraZoom-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/debug/app-debug.apka
