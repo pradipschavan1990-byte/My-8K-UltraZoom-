@@ -10,17 +10,20 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-      - name: Create dummy google-services.json
+      - name: Create google-services.json with correct package
         run: |
-          echo '{"project_info":{"project_number":"123","project_id":"dummy"},"client":[{"client_info":{"mobilesdk_app_id":"1:123:android:123","package_name":"com.example.my8kultrazoom"}}],"configuration_version":"1"}' > app/google-services.json
-      - name: Create debug keystore dir
+          echo '{"project_info":{"project_number":"123456789","project_id":"ultrazoom-8k"},"client":[{"client_info":{"mobilesdk_app_id":"1:123456789:android:abc123","package_name":"com.aistudio.ultrazoom8k.kxmv"},"oauth_client":[],"api_key":[{"current_key":"dummy_key"} Minu],"services":{"appinvite_service":{"other_platform_oauth_client":[]}}}],"configuration_version":"1"}' > app/google-services.json
+          cat app/google-services.json
+      - name: Create debug keystore
         run: |
-          mkdir -p app/
           keytool -genkey -v -keystore app/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          ls -la app/debug.keystore
+          ls -la debug.keystore
       - name: Setup Gradle
         uses: gradle/gradle-build-action@v3
       - name: Build Debug APK
-        run: gradle assembleDebug
+        run: gradle assembleDebug --stacktrace
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
