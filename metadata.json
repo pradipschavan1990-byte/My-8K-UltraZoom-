@@ -1,0 +1,6 @@
+{
+  "name": "My 8K UltraZoom",
+  "description": "10X Ultra Clear Zoom Camera with 100-Frame Fusion, AI Tripod Lock, Sniper Stabilizer Ring, and HDREAL 2.0 Super Resolution.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
