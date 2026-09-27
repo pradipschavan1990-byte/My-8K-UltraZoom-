@@ -9,12 +9,16 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-      - name: Fix google-services.json
+      - name: Force Delete Wrong Files
         run: |
-          echo '{"project_info":{"project_number":"123","project_id":"dummy"},"client":[{"client_info":{"mobilesdk_app_id":"1:123:android:abc","package_name":"com.aistudio.ultrazoom8k.kxmv"},"api_key":[{"current_key":"AIzaDummy"}]}]}' > app/google-services.json
+          find. -name "google-services.json" -delete
+          echo "All old files deleted"
+          echo '{"project_info":{"project_number":"123"},"client":[{"client_info":{"mobilesdk_app_id":"1:123:android:abc","package_name":"com.aistudio.ultrazoom8k.kxmv"},"api_key":[{"current_key":"AIzaDummy"}]}]}' > app/google-services.json
+          echo "New file created for kxmv"
+          cat app/google-services.json
       - uses: gradle/gradle-build-action@v3
       - run: gradle assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: APK
-          path: app/build/outputs/apk/debug/app-debug.apk2
+          name: 8K-UltraZoom-FULL-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
