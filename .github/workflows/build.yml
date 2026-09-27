@@ -10,6 +10,13 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
+      - name: Create dummy google-services.json
+        run: |
+          echo '{"project_info":{"project_number":"123","project_id":"dummy"},"client":[{"client_info":{"mobilesdk_app_id":"1:123:android:123","package_name":"com.example.my8kultrazoom"}}],"configuration_version":"1"}' > app/google-services.json
+      - name: Create debug keystore dir
+        run: |
+          mkdir -p app/
+          keytool -genkey -v -keystore app/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
       - name: Setup Gradle
         uses: gradle/gradle-build-action@v3
       - name: Build Debug APK
