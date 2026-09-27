@@ -1,37 +1,48 @@
-name: build
+name: Build Full 8K UltraZoom APK
 on: [push]
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Create correct google-services.json
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Create google-services.json
         run: |
           cat > app/google-services.json << 'EOF'
           {
-            "project_info": {"project_number": "1234567890","project_id": "dummy","storage_bucket": "dummy.appspot.com"},
-            "client": [{
-              "client_info": {"mobilesdk_app_id": "1:123:android:abc","package_name": "com.aistudio.ultrazoom8k.kxmv"},
-              "oauth_client": [],
-              "api_key": [{"current_key": "AIzaDummy123"}],
-              "services": {"appinvite_service": {"other_platform_oauth_client": []}}
-            }],
+            "project_info": {"project_number": "1234567890","project_id": "ultrazoom-8k","storage_bucket": "ultrazoom-8k.appspot.com"},
+            "client": [{"client_info": {"mobilesdk_app_id": "1:1234567890:android:abcdef","package_name": "com.aistudio.ultrazoom8k.kxmv"},"oauth_client": [],"api_key": [{"current_key": "AIzaDummyKey123"}],"services": {"appinvite_service": {"other_platform_oauth_client": []}}}],
             "configuration_version": "1"
           }
           EOF
           cat app/google-services.json
 
+      - name: Create Debug Keystore
+        run: |
+          keytool -genkey -v -keystore app/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          mkdir -p ~/.android
+          cp app/debug.keystore ~/.android/debug.keystore
+          cp app/debug.keystore./debug.keystore
+
       - name: Setup Gradle
         uses: gradle/gradle-build-action@v3
-      - name: Build Debug APK
-        run: gradle assembleDebug
-      - name: Upload APK
+
+      - name: Build Your Full AI Studio APK
+        run: |
+          chmod +x gradlew || true
+          if [ -f "./gradlew" ]; then./gradlew assembleDebug; else gradle assembleDebug; fi
+
+      - name: Upload Full APK
         uses: actions/upload-artifact@v4
         with:
-          name: 8K-UltraZoom-APK
+          name: 8K-UltraZoom-FULL-APK
           path: app/build/outputs/apk/debug/app-debug.apk
