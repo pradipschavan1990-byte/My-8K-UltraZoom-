@@ -9,14 +9,13 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-      - name: Force Delete Wrong Files
+      - name: Fix Firebase
         run: |
           find. -name "google-services.json" -delete
           echo '{"project_info":{"project_number":"123"},"client":[{"client_info":{"mobilesdk_app_id":"1:123:android:abc","package_name":"com.aistudio.ultrazoom8k.kxmv"},"api_key":[{"current_key":"AIzaDummy"}]}]}' > app/google-services.json
-          cat app/google-services.json
       - uses: gradle/gradle-build-action@v3
       - run: gradle assembleDebug
       - uses: actions/upload-artifact@v4
         with:
           name: 8K-UltraZoom-FULL-APK
-          path: app/build/outputs/apk/debug/app-debug.apkw
+          path: app/build/outputs/apk/debug/app-debug.apk
