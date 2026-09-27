@@ -12,9 +12,7 @@ jobs:
       - name: Force Delete Wrong Files
         run: |
           find. -name "google-services.json" -delete
-          echo "All old files deleted"
           echo '{"project_info":{"project_number":"123"},"client":[{"client_info":{"mobilesdk_app_id":"1:123:android:abc","package_name":"com.aistudio.ultrazoom8k.kxmv"},"api_key":[{"current_key":"AIzaDummy"}]}]}' > app/google-services.json
-          echo "New file created for kxmv"
           cat app/google-services.json
       - uses: gradle/gradle-build-action@v3
       - run: gradle assembleDebug
