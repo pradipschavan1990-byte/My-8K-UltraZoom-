@@ -10,7 +10,7 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
       - name: Fix Firebase
-        run: rm -rf app/google-services.json && echo '{"project_info":{"project_number":"123"},"client":[{"client_info":{"mobilesdk_app_id":"1:123:android:abc","package_name":"com.aistudio.ultrazoom8k.kxmv"},"api_key":[{"current_key":"AIzaDummy"}]}]}' > app/google-services.json
+        run: rm -rf app/google-services.json && echo '{"project_info":{"project_id":"ultrazoom8k-dummy","project_number":"1234567890","storage_bucket":"ultrazoom8k-dummy.appspot.com"},"client":[{"client_info":{"mobilesdk_app_id":"1:1234567890:android:abc123def456","android_client_info":{"package_name":"com.aistudio.ultrazoom8k.kxmv"}},"oauth_client":[],"api_key":[{"current_key":"AIzaSyDummyKey123456"}],"services":{"appinvite_service":{"other_platform_oauth_client":[]}}}],"configuration_version":"1"}' > app/google-services.json
       - uses: gradle/gradle-build-action@v3
       - run: gradle assembleDebug
       - uses: actions/upload-artifact@v4
