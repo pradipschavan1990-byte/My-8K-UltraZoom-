@@ -36,11 +36,18 @@ object FusionProcessingEngine {
         isDehaze: Boolean = false,
         capCutFilter: CapCutFilter = CapCutFilter.ORIGINAL,
         filterIntensity: Float = 1.0f,
+        applySoftwareCrop: Boolean = false,
         onProgress: (FusionProgress) -> Unit = {}
     ): Pair<Bitmap, Bitmap> = withContext(Dispatchers.Default) {
-        // Step 1: Telephoto Crop Extraction
-        // At 5X or 10X zoom, extract the center telephoto area
-        val rawTelephotoCrop = extractTelephotoCrop(baseBitmap, zoomFactor)
+        // Step 1: Telephoto Framing
+        // When capturing with the real camera or restoring a photo, the image is ALREADY
+        // framed and zoomed at zoomFactor by the camera hardware! Do NOT crop (WYSIWYG).
+        // Only apply software crop when simulating from an unzoomed 1X static sample asset.
+        val rawTelephotoCrop = if (applySoftwareCrop) {
+            extractTelephotoCrop(baseBitmap, zoomFactor)
+        } else {
+            baseBitmap.copy(Bitmap.Config.ARGB_8888, true)
+        }
 
         // Step 2: 100-Burst Frame Simulation & /HDREAL Neural Remaster Progress
         val totalBurst = 100
@@ -87,9 +94,7 @@ object FusionProcessingEngine {
     }
 
     /**
-     * Extracts the telephoto crop corresponding to the current zoom level.
-     * When zoomFactor is 5X or 10X, crops into the center and renders the realistic
-     * zoomed telephoto crop.
+     * Extracts the telephoto crop corresponding to the current zoom level for static simulation assets only.
      */
     fun extractTelephotoCrop(baseBitmap: Bitmap, zoomFactor: Float): Bitmap {
         if (zoomFactor <= 1.05f) {
@@ -99,8 +104,8 @@ object FusionProcessingEngine {
         val origW = baseBitmap.width
         val origH = baseBitmap.height
 
-        // Calculate telephoto crop window
-        val cropFactor = (1.0f / (1.0f + (zoomFactor - 1.0f) * 0.35f)).coerceIn(0.18f, 1.0f)
+        val zoomScale = (1.0f + (zoomFactor - 1.0f) * 0.18f).coerceIn(1.0f, 6.0f)
+        val cropFactor = (1.0f / zoomScale).coerceIn(0.16f, 1.0f)
         val cropW = (origW * cropFactor).roundToInt().coerceIn(60, origW)
         val cropH = (origH * cropFactor).roundToInt().coerceIn(60, origH)
 

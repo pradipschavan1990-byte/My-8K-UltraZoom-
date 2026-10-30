@@ -49,12 +49,16 @@ import com.example.ui.theme.NeonGreen
 import com.example.ui.theme.ObsidianBlack
 import kotlin.math.roundToInt
 
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.IconButton
+
 @Composable
 fun CapCutFilterBar(
     selectedFilter: CapCutFilter,
     intensity: Float,
     onFilterSelected: (CapCutFilter) -> Unit,
     onIntensityChanged: (Float) -> Unit,
+    onClose: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val filters = CapCutFilter.entries
@@ -64,8 +68,8 @@ fun CapCutFilterBar(
             .testTag("capcut_filter_bar")
             .fillMaxWidth()
             .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
-            .background(ObsidianBlack.copy(alpha = 0.92f))
-            .padding(vertical = 6.dp),
+            .background(ObsidianBlack.copy(alpha = 0.95f))
+            .padding(vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         // Filter Carousel Title & Intensity Slider Row
@@ -96,11 +100,11 @@ fun CapCutFilterBar(
                 )
             }
 
-            if (selectedFilter != CapCutFilter.ORIGINAL) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (selectedFilter != CapCutFilter.ORIGINAL) {
                     Text(
                         text = "INTENSITY ${(intensity * 100).roundToInt()}%",
                         color = NeonCyan,
@@ -108,6 +112,22 @@ fun CapCutFilterBar(
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace
                     )
+                }
+
+                if (onClose != null) {
+                    IconButton(
+                        onClick = onClose,
+                        modifier = Modifier
+                            .size(26.dp)
+                            .testTag("close_capcut_filter_bar")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close Filters",
+                            tint = Color.White.copy(alpha = 0.8f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
         }

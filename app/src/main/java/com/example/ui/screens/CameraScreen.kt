@@ -81,6 +81,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.ui.graphics.Brush
+import com.example.ui.components.CameraSettingsDialog
+import com.example.ui.components.TelemetryModalDialog
 import com.example.R
 import com.example.engine.CapCutFilter
 import com.example.ui.components.CapCutFilterBar
@@ -141,6 +146,57 @@ fun CameraScreen(
 
     var boundCameraControl by remember { mutableStateOf<androidx.camera.core.CameraControl?>(null) }
     var activePreviewView by remember { mutableStateOf<PreviewView?>(null) }
+    var maxZoomRatio by remember { mutableStateOf(10f) }
+    var minZoomRatio by remember { mutableStateOf(0.6f) }
+
+    // Minimalist Pop-up Window States
+    var showFilterDrawer by remember { mutableStateOf(false) }
+    var showTelemetryModal by remember { mutableStateOf(false) }
+    var showSettingsModal by remember { mutableStateOf(false) }
+
+    DisposableEffect(activePreviewView) {
+        viewModel.currentFrameProvider = { activePreviewView?.bitmap }
+        onDispose {
+            viewModel.currentFrameProvider = null
+        }
+    }
+
+    LaunchedEffect(uiState.currentZoom, boundCameraControl, maxZoomRatio, minZoomRatio) {
+        boundCameraControl?.let { control ->
+            try {
+                control.setZoomRatio(uiState.currentZoom.coerceIn(minZoomRatio, maxZoomRatio))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    // Pro Settings Pop-up Modal
+    if (showSettingsModal) {
+        CameraSettingsDialog(
+            isTripodLockEnabled = uiState.isTripodLockEnabled,
+            onToggleTripodLock = { viewModel.toggleTripodLock() },
+            isSaveRawEnabled = uiState.isSaveRawEnabled,
+            onToggleSaveRaw = { viewModel.toggleSaveRaw() },
+            isSilentSpyMode = uiState.isSilentSpyMode,
+            onToggleSilentSpyMode = { viewModel.toggleSilentSpyMode() },
+            isPipVisible = uiState.isPipOverviewVisible,
+            onTogglePip = { viewModel.togglePipOverview() },
+            onOpenPhotoRestore = onNavigateToRestore,
+            onDismiss = { showSettingsModal = false }
+        )
+    }
+
+    // Pro Telemetry & LiDAR Radar Pop-up Modal
+    if (showTelemetryModal) {
+        TelemetryModalDialog(
+            telemetry = telemetry,
+            zoomLevel = uiState.currentZoom,
+            isTripodLockEnabled = uiState.isTripodLockEnabled,
+            activeMode = uiState.activeMode,
+            onDismiss = { showTelemetryModal = false }
+        )
+    }
 
     Box(
         modifier = Modifier
@@ -153,7 +209,10 @@ fun CameraScreen(
             Box(modifier = Modifier.fillMaxSize()) {
                 AndroidView(
                     factory = { ctx ->
-                        val previewView = PreviewView(ctx)
+                        val previewView = PreviewView(ctx).apply {
+                            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                            scaleType = PreviewView.ScaleType.FILL_CENTER
+                        }
                         activePreviewView = previewView
                         val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
                         cameraProviderFuture.addListener({
@@ -166,7 +225,13 @@ fun CameraScreen(
                                 cameraProvider.unbindAll()
                                 val camera = cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview)
                                 boundCameraControl = camera.cameraControl
-                                camera.cameraControl.setZoomRatio(uiState.currentZoom.coerceIn(1f, 8f))
+
+                                val zState = camera.cameraInfo.zoomState.value
+                                val maxZ = zState?.maxZoomRatio ?: 10f
+                                val minZ = zState?.minZoomRatio ?: 0.6f
+                                maxZoomRatio = maxZ
+                                minZoomRatio = minZ
+                                camera.cameraControl.setZoomRatio(uiState.currentZoom.coerceIn(minZ, maxZ))
                             } catch (e: Exception) {
                                 e.printStackTrace()
                             }
@@ -175,7 +240,11 @@ fun CameraScreen(
                     },
                     update = { pView ->
                         activePreviewView = pView
-                        boundCameraControl?.setZoomRatio(uiState.currentZoom.coerceIn(1f, 8f))
+                        try {
+                            boundCameraControl?.setZoomRatio(uiState.currentZoom.coerceIn(minZoomRatio, maxZoomRatio))
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
                     },
                     modifier = Modifier
                         .fillMaxSize()
@@ -284,27 +353,34 @@ fun CameraScreen(
             }
         }
 
-        // 3. Top HUD: Telemetry & Controls
-        Column(
+        // 3. Ultra-Clean Top HUD (Minimalist, Transparent Gradient)
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.TopCenter)
-                .background(ObsidianBlack.copy(alpha = 0.88f))
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            ObsidianBlack.copy(alpha = 0.90f),
+                            Color.Transparent
+                        )
+                    )
+                )
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            // POCO X6 Hardware Indicator Line
-            Row(
+            // Left: Device & Active Lens Mode (Clickable for Pro Settings)
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { showSettingsModal = true }
+                    .padding(horizontal = 4.dp, vertical = 2.dp)
             ) {
                 Text(
-                    text = "POCO X6 5G • TRIPLE CAM",
+                    text = "POCO X6 5G",
                     color = CyberGold,
-                    fontSize = 9.5.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace
                 )
@@ -322,190 +398,103 @@ fun CameraScreen(
                 )
             }
 
-            // Mode Tabs (10X /HDREAL | 64MP | 8MP UW | 2MP MACRO | MOON | 4K VIDEO)
-            val modes = CameraMode.entries
-            ScrollableTabRow(
-                selectedTabIndex = modes.indexOf(uiState.activeMode),
-                containerColor = Color.Transparent,
-                contentColor = NeonCyan,
-                edgePadding = 4.dp,
-                indicator = { tabPositions ->
-                    val idx = modes.indexOf(uiState.activeMode)
-                    if (idx in tabPositions.indices) {
-                        TabRowDefaults.SecondaryIndicator(
-                            modifier = Modifier.tabIndicatorOffset(tabPositions[idx]),
-                            color = CyberGold,
-                            height = 2.5.dp
-                        )
-                    }
-                },
-                divider = {}
+            // Center: Minimalist Clickable Telemetry Pop-up Chip
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(DarkGlassSurface.copy(alpha = 0.92f))
+                    .border(1.dp, NeonCyan.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
+                    .clickable { showTelemetryModal = true }
+                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                    .testTag("open_telemetry_chip")
             ) {
-                modes.forEach { mode ->
-                    val isSelected = uiState.activeMode == mode
-                    Tab(
-                        selected = isSelected,
-                        onClick = { viewModel.setMode(mode) },
-                        modifier = Modifier.testTag("tab_mode_${mode.name.lowercase()}"),
-                        text = {
-                            Text(
-                                text = mode.title.uppercase(),
-                                color = if (isSelected) CyberGold else Color.White.copy(alpha = 0.6f),
-                                fontSize = 11.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(if (telemetry.isSniperSteady) NeonGreen else CyberGold)
                     )
-                }
-            }
-
-            // Quick Toggle Pill Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Tripod Lock Toggle
-                Box(
-                    modifier = Modifier
-                        .testTag("toggle_tripod_lock")
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(if (uiState.isTripodLockEnabled) NeonCyan.copy(alpha = 0.2f) else DarkGlassCard)
-                        .border(
-                            1.dp,
-                            if (uiState.isTripodLockEnabled) NeonCyan else DarkGlassBorder,
-                            RoundedCornerShape(14.dp)
-                        )
-                        .clickable { viewModel.toggleTripodLock() }
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Lock,
-                            contentDescription = "Tripod Lock",
-                            tint = if (uiState.isTripodLockEnabled) NeonCyan else Color.White.copy(alpha = 0.5f),
-                            modifier = Modifier.size(12.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "TRIPOD LOCK",
-                            color = if (uiState.isTripodLockEnabled) NeonCyan else Color.White.copy(alpha = 0.5f),
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-                }
-
-                // Active CapCut Filter indicator pill
-                Box(
-                    modifier = Modifier
-                        .testTag("toggle_filter_pill")
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(if (uiState.selectedCapCutFilter != CapCutFilter.ORIGINAL) CyberGold.copy(alpha = 0.25f) else DarkGlassCard)
-                        .border(
-                            1.dp,
-                            if (uiState.selectedCapCutFilter != CapCutFilter.ORIGINAL) CyberGold else DarkGlassBorder,
-                            RoundedCornerShape(14.dp)
-                        )
-                        .clickable { viewModel.toggleFilterSelector() }
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.AutoAwesome,
-                            contentDescription = "CapCut Filter",
-                            tint = if (uiState.selectedCapCutFilter != CapCutFilter.ORIGINAL) CyberGold else Color.White.copy(alpha = 0.6f),
-                            modifier = Modifier.size(12.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = uiState.selectedCapCutFilter.displayName.uppercase(),
-                            color = if (uiState.selectedCapCutFilter != CapCutFilter.ORIGINAL) CyberGold else Color.White.copy(alpha = 0.8f),
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-                }
-
-                // RAW + AI Toggle
-                Box(
-                    modifier = Modifier
-                        .testTag("toggle_save_raw")
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(if (uiState.isSaveRawEnabled) NeonGreen.copy(alpha = 0.2f) else DarkGlassCard)
-                        .border(
-                            1.dp,
-                            if (uiState.isSaveRawEnabled) NeonGreen else DarkGlassBorder,
-                            RoundedCornerShape(14.dp)
-                        )
-                        .clickable { viewModel.toggleSaveRaw() }
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
                     Text(
-                        text = if (uiState.isSaveRawEnabled) "RAW+AI ON" else "RAW OFF",
-                        color = if (uiState.isSaveRawEnabled) NeonGreen else Color.White.copy(alpha = 0.5f),
-                        fontSize = 9.sp,
+                        text = "${telemetry.distanceDisplay} • ${telemetry.stabilityScore}% STABLE",
+                        color = Color.White,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace
                     )
                 }
+            }
 
-                // Silent Spy Mode Toggle
-                IconButton(
-                    onClick = { viewModel.toggleSilentSpyMode() },
+            // Right: Quick Pop-up Launchers (Filters ✨ & Settings ⚙️)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Filter Wand Pop-up Trigger
+                Box(
                     modifier = Modifier
-                        .size(28.dp)
-                        .testTag("toggle_spy_mode")
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (uiState.selectedCapCutFilter != CapCutFilter.ORIGINAL || showFilterDrawer)
+                                CyberGold.copy(alpha = 0.35f)
+                            else DarkGlassCard
+                        )
+                        .border(
+                            1.dp,
+                            if (uiState.selectedCapCutFilter != CapCutFilter.ORIGINAL) CyberGold else DarkGlassBorder,
+                            CircleShape
+                        )
+                        .clickable { showFilterDrawer = !showFilterDrawer }
+                        .testTag("top_filter_button"),
+                    contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = if (uiState.isSilentSpyMode) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
-                        contentDescription = "Spy / Silent Mode",
-                        tint = if (uiState.isSilentSpyMode) CyberGold else Color.White,
-                        modifier = Modifier.size(16.dp)
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = "CapCut Filters",
+                        tint = if (uiState.selectedCapCutFilter != CapCutFilter.ORIGINAL) CyberGold else Color.White,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
 
-                // Old Photo Restore Tool Button
-                IconButton(
-                    onClick = onNavigateToRestore,
+                // Pro Settings Dialog Trigger
+                Box(
                     modifier = Modifier
-                        .size(28.dp)
-                        .testTag("open_photo_restore")
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(DarkGlassCard)
+                        .border(1.dp, DarkGlassBorder, CircleShape)
+                        .clickable { showSettingsModal = true }
+                        .testTag("top_settings_button"),
+                    contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.AutoFixHigh,
-                        contentDescription = "Old Photo Restore Tool",
-                        tint = NeonCyan,
-                        modifier = Modifier.size(16.dp)
+                        imageVector = Icons.Default.Tune,
+                        contentDescription = "Pro Settings",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }
         }
 
-        // 4. Overlays: Distance Meter & Dual Zoom PiP Window
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 110.dp, start = 12.dp, end = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Top
-        ) {
-            DistanceMeterOverlay(
-                telemetry = telemetry,
-                zoomLevel = uiState.currentZoom,
-                isTripodLockEnabled = uiState.isTripodLockEnabled,
-                activeMode = uiState.activeMode
-            )
-
-            DualZoomPipWindow(
-                isVisible = uiState.isPipOverviewVisible,
-                currentZoom = uiState.currentZoom,
-                isMoonMode = uiState.activeMode == CameraMode.MOON_MODE,
-                onCloseClick = { viewModel.togglePipOverview() }
-            )
+        // 4. Picture-in-Picture Mini Radar Window (only when active)
+        if (uiState.isPipOverviewVisible) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 62.dp, end = 12.dp)
+            ) {
+                DualZoomPipWindow(
+                    isVisible = true,
+                    currentZoom = uiState.currentZoom,
+                    isMoonMode = uiState.activeMode == CameraMode.MOON_MODE,
+                    onCloseClick = { viewModel.togglePipOverview() }
+                )
+            }
         }
 
         // Switch simulator subject button when in emulator mode
@@ -570,7 +559,66 @@ fun CameraScreen(
             }
         }
 
-        // 5. Bottom Control Deck (CapCut Filter Carousel + Zoom Slider + Shutter + Vault)
+        // 5. CapCut Filter Pop-up Drawer (Slides up smoothly when ✨ is tapped)
+        AnimatedVisibility(
+            visible = showFilterDrawer,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 205.dp)
+                .fillMaxWidth()
+        ) {
+            CapCutFilterBar(
+                selectedFilter = uiState.selectedCapCutFilter,
+                intensity = uiState.capCutFilterIntensity,
+                onFilterSelected = { viewModel.setCapCutFilter(it) },
+                onIntensityChanged = { viewModel.setCapCutFilterIntensity(it) },
+                onClose = { showFilterDrawer = false }
+            )
+        }
+
+        // Active Filter indicator chip when filter drawer is closed
+        if (uiState.selectedCapCutFilter != CapCutFilter.ORIGINAL && !showFilterDrawer) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 210.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(DarkGlassSurface.copy(alpha = 0.92f))
+                    .border(1.dp, CyberGold.copy(alpha = 0.75f), RoundedCornerShape(16.dp))
+                    .clickable { showFilterDrawer = true }
+                    .padding(horizontal = 12.dp, vertical = 5.dp)
+                    .testTag("active_filter_indicator_chip")
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = "Active Filter",
+                        tint = CyberGold,
+                        modifier = Modifier.size(12.dp)
+                    )
+                    Text(
+                        text = "${uiState.selectedCapCutFilter.displayName} (${(uiState.capCutFilterIntensity * 100).roundToInt()}%)",
+                        color = CyberGold,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Text(
+                        text = "• TAP TO CHANGE",
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 8.5.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+        }
+
+        // 6. Clean Bottom Control Deck
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -580,14 +628,6 @@ fun CameraScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // CapCut Viral Filters Horizontal Carousel
-            CapCutFilterBar(
-                selectedFilter = uiState.selectedCapCutFilter,
-                intensity = uiState.capCutFilterIntensity,
-                onFilterSelected = { viewModel.setCapCutFilter(it) },
-                onIntensityChanged = { viewModel.setCapCutFilterIntensity(it) }
-            )
-
             // Zoom Dial Slider
             ZoomDialSlider(
                 zoomLevel = uiState.currentZoom,
@@ -598,93 +638,44 @@ fun CameraScreen(
                 onStepHaptic = { viewModel.hapticSoundManager.onZoomStepChanged() }
             )
 
-            // Mode Switcher Bar: PHOTO vs VIDEO
+            // Camera Modes Tab Carousel
+            val modes = CameraMode.entries
             val isVideoMode = (uiState.activeMode == CameraMode.VIDEO_4K)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
+            ScrollableTabRow(
+                selectedTabIndex = modes.indexOf(uiState.activeMode),
+                containerColor = Color.Transparent,
+                contentColor = NeonCyan,
+                edgePadding = 16.dp,
+                indicator = { tabPositions ->
+                    val idx = modes.indexOf(uiState.activeMode)
+                    if (idx in tabPositions.indices) {
+                        TabRowDefaults.SecondaryIndicator(
+                            modifier = Modifier.tabIndicatorOffset(tabPositions[idx]),
+                            color = if (isVideoMode) WarningRed else CyberGold,
+                            height = 2.dp
+                        )
+                    }
+                },
+                divider = {}
             ) {
-                // PHOTO Tab
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(if (!isVideoMode) CyberGold.copy(alpha = 0.28f) else DarkGlassSurface.copy(alpha = 0.6f))
-                        .border(
-                            1.5.dp,
-                            if (!isVideoMode) CyberGold else DarkGlassBorder,
-                            RoundedCornerShape(20.dp)
-                        )
-                        .clickable {
-                            if (isVideoMode) {
-                                viewModel.setMode(CameraMode.FUSION_100)
-                            }
+                modes.forEach { mode ->
+                    val isSelected = uiState.activeMode == mode
+                    Tab(
+                        selected = isSelected,
+                        onClick = { viewModel.setMode(mode) },
+                        modifier = Modifier.testTag("tab_mode_${mode.name.lowercase()}"),
+                        text = {
+                            Text(
+                                text = mode.title.uppercase(),
+                                color = if (isSelected) {
+                                    if (mode == CameraMode.VIDEO_4K) WarningRed else CyberGold
+                                } else Color.White.copy(alpha = 0.6f),
+                                fontSize = 11.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                fontFamily = FontFamily.Monospace
+                            )
                         }
-                        .padding(horizontal = 20.dp, vertical = 7.dp)
-                        .testTag("mode_switch_photo"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.CameraAlt,
-                            contentDescription = "Photo Mode",
-                            tint = if (!isVideoMode) CyberGold else Color.White.copy(alpha = 0.6f),
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "PHOTO",
-                            color = if (!isVideoMode) CyberGold else Color.White.copy(alpha = 0.6f),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(14.dp))
-
-                // VIDEO Tab
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(if (isVideoMode) WarningRed.copy(alpha = 0.32f) else DarkGlassSurface.copy(alpha = 0.6f))
-                        .border(
-                            1.5.dp,
-                            if (isVideoMode) WarningRed else DarkGlassBorder,
-                            RoundedCornerShape(20.dp)
-                        )
-                        .clickable {
-                            if (!isVideoMode) {
-                                viewModel.setMode(CameraMode.VIDEO_4K)
-                            }
-                        }
-                        .padding(horizontal = 20.dp, vertical = 7.dp)
-                        .testTag("mode_switch_video"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Videocam,
-                            contentDescription = "Video Mode",
-                            tint = if (isVideoMode) WarningRed else Color.White.copy(alpha = 0.6f),
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = "VIDEO",
-                            color = if (isVideoMode) WarningRed else Color.White.copy(alpha = 0.6f),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
+                    )
                 }
             }
 

@@ -81,6 +81,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val _uiState = MutableStateFlow(CameraUiState())
     val uiState: StateFlow<CameraUiState> = _uiState.asStateFlow()
 
+    var currentFrameProvider: (() -> Bitmap?)? = null
+
     private var videoJob: Job? = null
     private var autoFireCooldown = false
     @Volatile
@@ -369,7 +371,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             _uiState.value = _uiState.value.copy(isProcessingFusion = true)
 
             val context = getApplication<Application>()
-            val baseBitmap: Bitmap = sourceBitmap ?: run {
+            val liveSource = sourceBitmap ?: currentFrameProvider?.invoke()
+            val isFromLiveCamera = (liveSource != null)
+            val baseBitmap: Bitmap = liveSource ?: run {
                 val resId = when {
                     _uiState.value.activeMode == CameraMode.MACRO_2MP || _uiState.value.simulationSubjectIndex == 2 -> R.drawable.sample_macro
                     _uiState.value.activeMode == CameraMode.ULTRA_WIDE_06X || _uiState.value.simulationSubjectIndex == 3 || _uiState.value.currentZoom <= 0.65f -> R.drawable.sample_ultrawide
@@ -384,6 +388,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val activeFilter = _uiState.value.selectedCapCutFilter
             val filterIntensity = _uiState.value.capCutFilterIntensity
 
+            // Never apply software crop if capturing live camera frames or if already framed (WYSIWYG)
+            val shouldApplySoftwareCrop = !isFromLiveCamera
+
             val (rawBmp, enhancedBmp) = FusionProcessingEngine.process100FrameFusion(
                 context = context,
                 baseBitmap = baseBitmap,
@@ -391,7 +398,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 isMoonMode = isMoon,
                 isDehaze = false,
                 capCutFilter = activeFilter,
-                filterIntensity = filterIntensity
+                filterIntensity = filterIntensity,
+                applySoftwareCrop = shouldApplySoftwareCrop
             ) { progress ->
                 _uiState.value = _uiState.value.copy(fusionProgress = progress)
             }
