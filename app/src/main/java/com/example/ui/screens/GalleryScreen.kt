@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlayCircle
@@ -57,7 +58,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import com.example.engine.MediaStorageHelper
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -310,6 +314,51 @@ fun GalleryScreen(
                         color = Color.White.copy(alpha = 0.5f),
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace
+                    )
+                }
+
+                // Explicit Save/Export to Device Gallery button (DCIM/UltraZoom8K)
+                val scope = rememberCoroutineScope()
+                Button(
+                    onClick = {
+                        scope.launch {
+                            if (isVideo && videoFile != null && videoFile.exists()) {
+                                MediaStorageHelper.exportVideoToGallery(
+                                    context = context,
+                                    sourceVideoFile = videoFile,
+                                    filenamePrefix = "video_${photo.filterName.lowercase()}",
+                                    showToast = true
+                                )
+                            } else if (enhancedBitmap != null) {
+                                MediaStorageHelper.saveImageToGallery(
+                                    context = context,
+                                    bitmap = enhancedBitmap,
+                                    filenamePrefix = "photo_${photo.filterName.lowercase()}",
+                                    showToast = true
+                                )
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = CyberGold),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("save_to_device_gallery_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FileDownload,
+                        contentDescription = "Save to Phone Gallery",
+                        tint = ObsidianBlack,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "फोन गॅलरीमध्ये सेव्ह करा (DCIM/UltraZoom8K)",
+                        color = ObsidianBlack,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp
                     )
                 }
 

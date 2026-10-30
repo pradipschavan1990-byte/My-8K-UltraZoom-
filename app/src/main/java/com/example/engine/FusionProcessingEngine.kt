@@ -240,8 +240,21 @@ object FusionProcessingEngine {
         return output
     }
 
-    suspend fun saveBitmapToFile(context: Context, bitmap: Bitmap, prefix: String): String =
-        withContext(Dispatchers.IO) {
+    suspend fun saveBitmapToFile(
+        context: Context,
+        bitmap: Bitmap,
+        prefix: String,
+        exportToGallery: Boolean = true
+    ): String = withContext(Dispatchers.IO) {
+        if (exportToGallery && !prefix.contains("thumb")) {
+            val (localPath, _) = MediaStorageHelper.saveImageToGallery(
+                context = context,
+                bitmap = bitmap,
+                filenamePrefix = prefix,
+                showToast = true
+            )
+            localPath
+        } else {
             val dir = File(context.filesDir, "ultra_zoom_captures")
             if (!dir.exists()) dir.mkdirs()
             val file = File(dir, "${prefix}_${System.currentTimeMillis()}.jpg")
@@ -250,6 +263,7 @@ object FusionProcessingEngine {
             }
             file.absolutePath
         }
+    }
 
     fun loadBitmapFromResourceOrFile(context: Context, pathOrRes: String): Bitmap? {
         return try {

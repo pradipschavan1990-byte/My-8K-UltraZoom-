@@ -13,6 +13,7 @@ import com.example.engine.CapCutFilterEngine
 import com.example.engine.FusionProcessingEngine
 import com.example.engine.FusionProgress
 import com.example.engine.HapticSoundManager
+import com.example.engine.MediaStorageHelper
 import com.example.engine.SensorTelemetryManager
 import com.example.engine.TelemetryData
 import com.example.engine.VideoProcessingEngine
@@ -297,10 +298,24 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 )
 
+                // Export video directly to device public MediaStore gallery (DCIM/UltraZoom8K)
+                val videoFile = File(videoPath)
+                MediaStorageHelper.exportVideoToGallery(
+                    context = context,
+                    sourceVideoFile = videoFile,
+                    filenamePrefix = "video_${currentFilter.id}",
+                    showToast = true
+                )
+
                 // Capture thumbnail
                 val base = frameSupplier()
                 val filteredThumb = CapCutFilterEngine.applyFilter(base, currentFilter, filterIntensity)
-                val thumbPath = FusionProcessingEngine.saveBitmapToFile(context, filteredThumb, "video_thumb")
+                val thumbPath = FusionProcessingEngine.saveBitmapToFile(
+                    context = context,
+                    bitmap = filteredThumb,
+                    prefix = "video_thumb",
+                    exportToGallery = false
+                )
 
                 val duration = _uiState.value.videoRecordingSeconds.coerceAtLeast(1)
                 val tele = telemetry.value
@@ -335,7 +350,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     _uiState.value = _uiState.value.copy(
                         isRecordingVideo = false,
                         lastCapturedPhoto = savedEntity,
-                        lastSavedVideoMessage = "4K Video Saved with ${currentFilter.displayName}!"
+                        lastSavedVideoMessage = "व्हिडिओ गॅलरीमध्ये सेव्ह झाला! (DCIM/UltraZoom8K)"
                     )
                 }
             }

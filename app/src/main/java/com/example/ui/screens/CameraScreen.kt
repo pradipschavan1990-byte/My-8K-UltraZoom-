@@ -118,18 +118,29 @@ fun CameraScreen(
             ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
         )
     }
+    var hasAudioPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        )
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        hasCameraPermission = isGranted
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        hasCameraPermission = permissions[Manifest.permission.CAMERA] ?: hasCameraPermission
+        hasAudioPermission = permissions[Manifest.permission.RECORD_AUDIO] ?: hasAudioPermission
     }
 
     LaunchedEffect(Unit) {
-        if (!hasCameraPermission) {
-            permissionLauncher.launch(Manifest.permission.CAMERA)
+        if (!hasCameraPermission || !hasAudioPermission) {
+            permissionLauncher.launch(
+                arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
+            )
         }
     }
+
+    var boundCameraControl by remember { mutableStateOf<androidx.camera.core.CameraControl?>(null) }
+    var activePreviewView by remember { mutableStateOf<PreviewView?>(null) }
 
     Box(
         modifier = Modifier
@@ -143,6 +154,7 @@ fun CameraScreen(
                 AndroidView(
                     factory = { ctx ->
                         val previewView = PreviewView(ctx)
+                        activePreviewView = previewView
                         val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
                         cameraProviderFuture.addListener({
                             try {
@@ -153,12 +165,17 @@ fun CameraScreen(
                                 val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
                                 cameraProvider.unbindAll()
                                 val camera = cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview)
+                                boundCameraControl = camera.cameraControl
                                 camera.cameraControl.setZoomRatio(uiState.currentZoom.coerceIn(1f, 8f))
                             } catch (e: Exception) {
                                 e.printStackTrace()
                             }
                         }, ContextCompat.getMainExecutor(ctx))
                         previewView
+                    },
+                    update = { pView ->
+                        activePreviewView = pView
+                        boundCameraControl?.setZoomRatio(uiState.currentZoom.coerceIn(1f, 8f))
                     },
                     modifier = Modifier
                         .fillMaxSize()
@@ -581,6 +598,126 @@ fun CameraScreen(
                 onStepHaptic = { viewModel.hapticSoundManager.onZoomStepChanged() }
             )
 
+            // Mode Switcher Bar: PHOTO vs VIDEO
+            val isVideoMode = (uiState.activeMode == CameraMode.VIDEO_4K)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // PHOTO Tab
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(if (!isVideoMode) CyberGold.copy(alpha = 0.28f) else DarkGlassSurface.copy(alpha = 0.6f))
+                        .border(
+                            1.5.dp,
+                            if (!isVideoMode) CyberGold else DarkGlassBorder,
+                            RoundedCornerShape(20.dp)
+                        )
+                        .clickable {
+                            if (isVideoMode) {
+                                viewModel.setMode(CameraMode.FUSION_100)
+                            }
+                        }
+                        .padding(horizontal = 20.dp, vertical = 7.dp)
+                        .testTag("mode_switch_photo"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CameraAlt,
+                            contentDescription = "Photo Mode",
+                            tint = if (!isVideoMode) CyberGold else Color.White.copy(alpha = 0.6f),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "PHOTO",
+                            color = if (!isVideoMode) CyberGold else Color.White.copy(alpha = 0.6f),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(14.dp))
+
+                // VIDEO Tab
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(if (isVideoMode) WarningRed.copy(alpha = 0.32f) else DarkGlassSurface.copy(alpha = 0.6f))
+                        .border(
+                            1.5.dp,
+                            if (isVideoMode) WarningRed else DarkGlassBorder,
+                            RoundedCornerShape(20.dp)
+                        )
+                        .clickable {
+                            if (!isVideoMode) {
+                                viewModel.setMode(CameraMode.VIDEO_4K)
+                            }
+                        }
+                        .padding(horizontal = 20.dp, vertical = 7.dp)
+                        .testTag("mode_switch_video"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Videocam,
+                            contentDescription = "Video Mode",
+                            tint = if (isVideoMode) WarningRed else Color.White.copy(alpha = 0.6f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "VIDEO",
+                            color = if (isVideoMode) WarningRed else Color.White.copy(alpha = 0.6f),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
+
+            // Video Recording Timer & HUD readout if recording is active
+            if (uiState.isRecordingVideo) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(WarningRed.copy(alpha = 0.9f))
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(Color.White)
+                    )
+                    Text(
+                        text = "REC " + String.format(
+                            "%02d:%02d",
+                            uiState.videoRecordingSeconds / 60,
+                            uiState.videoRecordingSeconds % 60
+                        ) + " • 4K 10X (${uiState.selectedCapCutFilter.displayName})",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+
             // Shutter Deck Row
             Row(
                 modifier = Modifier
@@ -592,108 +729,194 @@ fun CameraScreen(
                 // Left: 8K Vault / Gallery Button
                 Box(
                     modifier = Modifier
-                        .size(52.dp)
-                        .clip(RoundedCornerShape(12.dp))
+                        .size(54.dp)
+                        .clip(RoundedCornerShape(14.dp))
                         .background(DarkGlassCard)
-                        .border(1.dp, NeonCyan.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                        .border(1.dp, NeonCyan.copy(alpha = 0.7f), RoundedCornerShape(14.dp))
                         .clickable { onNavigateToGallery() }
                         .testTag("camera_gallery_button"),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.PhotoLibrary,
-                        contentDescription = "8K Gallery Vault",
-                        tint = NeonCyan,
-                        modifier = Modifier.size(24.dp)
-                    )
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PhotoLibrary,
+                            contentDescription = "8K Gallery Vault",
+                            tint = NeonCyan,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Text(
+                            text = "GALLERY",
+                            color = NeonCyan,
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
                 }
 
                 // Center: Big Shutter Button
-                if (uiState.activeMode == CameraMode.VIDEO_4K) {
-                    // 4K Video Shutter Button
+                if (isVideoMode) {
+                    // 4K Video Shutter Button (Vibrant Red)
                     Box(
                         modifier = Modifier
-                            .size(76.dp)
+                            .size(80.dp)
                             .clip(CircleShape)
-                            .border(3.dp, if (uiState.isRecordingVideo) WarningRed else Color.White, CircleShape)
-                            .clickable { viewModel.toggleVideoRecording() }
+                            .border(
+                                3.5.dp,
+                                if (uiState.isRecordingVideo) WarningRed else Color.White,
+                                CircleShape
+                            )
+                            .clickable {
+                                val frameSupplier: (() -> Bitmap)? = activePreviewView?.let { pv ->
+                                    {
+                                        pv.bitmap ?: BitmapFactory.decodeResource(
+                                            context.resources,
+                                            when {
+                                                uiState.simulationSubjectIndex == 2 -> R.drawable.sample_macro
+                                                uiState.simulationSubjectIndex == 3 || uiState.currentZoom <= 0.65f -> R.drawable.sample_ultrawide
+                                                uiState.simulationSubjectIndex == 1 -> R.drawable.sample_moon
+                                                else -> R.drawable.sample_eagle
+                                            }
+                                        )
+                                    }
+                                }
+                                viewModel.toggleVideoRecording(frameSupplier)
+                            }
                             .testTag("video_shutter_button"),
                         contentAlignment = Alignment.Center
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(if (uiState.isRecordingVideo) 28.dp else 56.dp)
-                                .clip(if (uiState.isRecordingVideo) RoundedCornerShape(6.dp) else CircleShape)
-                                .background(WarningRed)
-                        )
+                        if (uiState.isRecordingVideo) {
+                            // Stop Recording Square
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(WarningRed)
+                            )
+                        } else {
+                            // Start Recording Red Circle with Video Icon
+                            Box(
+                                modifier = Modifier
+                                    .size(62.dp)
+                                    .clip(CircleShape)
+                                    .background(WarningRed),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Videocam,
+                                    contentDescription = "Start Video Recording",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                        }
                     }
                 } else {
-                    // 100-Frame Fusion Photo Shutter Button
+                    // 100-Frame Fusion Photo Shutter Button (CyberGold)
                     Box(
                         modifier = Modifier
-                            .size(78.dp)
+                            .size(80.dp)
                             .clip(CircleShape)
                             .border(
-                                3.dp,
+                                3.5.dp,
                                 if (telemetry.isSniperSteady) NeonGreen else CyberGold,
                                 CircleShape
                             )
-                            .clickable { viewModel.triggerFusionCapture(null) }
+                            .clickable {
+                                // Capture real camera frame from active preview if available
+                                val liveBmp = activePreviewView?.bitmap
+                                viewModel.triggerFusionCapture(liveBmp)
+                            }
                             .testTag("photo_shutter_button"),
                         contentAlignment = Alignment.Center
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(60.dp)
+                                .size(62.dp)
                                 .clip(CircleShape)
-                                .background(CyberGold)
-                        )
+                                .background(CyberGold),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CameraAlt,
+                                contentDescription = "Capture 10X Photo",
+                                tint = ObsidianBlack,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
                     }
                 }
 
-                // Right: Subject / PiP Toggle Button
-                Box(
-                    modifier = Modifier
-                        .size(52.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(DarkGlassCard)
-                        .border(1.dp, DarkGlassBorder, RoundedCornerShape(12.dp))
-                        .clickable { viewModel.togglePipOverview() }
-                        .testTag("camera_pip_toggle"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.CenterFocusStrong,
-                        contentDescription = "Toggle PiP Dual Zoom Window",
-                        tint = CyberGold,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-            }
-
-            // Video Recording Timer Readout if recording
-            if (uiState.isRecordingVideo) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
+                // Right: Dedicated Quick Video Record / PiP Toggle Button
+                if (!isVideoMode) {
+                    // Quick Video Record Shortcut Button
                     Box(
                         modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(WarningRed)
-                    )
-                    Text(
-                        text = "4K 10X REC  " + String.format(
-                            "%02d:%02d",
-                            uiState.videoRecordingSeconds / 60,
-                            uiState.videoRecordingSeconds % 60
-                        ) + " • ${uiState.selectedCapCutFilter.displayName.uppercase()}",
-                        color = Color.White,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
+                            .size(54.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(DarkGlassCard)
+                            .border(1.dp, WarningRed.copy(alpha = 0.7f), RoundedCornerShape(14.dp))
+                            .clickable {
+                                viewModel.setMode(CameraMode.VIDEO_4K)
+                            }
+                            .testTag("quick_video_button"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Videocam,
+                                contentDescription = "Switch to Video",
+                                tint = WarningRed,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Text(
+                                text = "REC 4K",
+                                color = WarningRed,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+                } else {
+                    // Switch back to Photo Mode Button
+                    Box(
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(DarkGlassCard)
+                            .border(1.dp, CyberGold.copy(alpha = 0.7f), RoundedCornerShape(14.dp))
+                            .clickable {
+                                viewModel.setMode(CameraMode.FUSION_100)
+                            }
+                            .testTag("switch_to_photo_button"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CameraAlt,
+                                contentDescription = "Switch to Photo",
+                                tint = CyberGold,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Text(
+                                text = "PHOTO",
+                                color = CyberGold,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
                 }
             }
         }
