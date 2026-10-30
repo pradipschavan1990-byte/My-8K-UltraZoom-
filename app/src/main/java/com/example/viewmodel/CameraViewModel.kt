@@ -8,11 +8,14 @@ import androidx.lifecycle.viewModelScope
 import com.example.R
 import com.example.data.AppDatabase
 import com.example.data.CapturedPhotoEntity
+import com.example.engine.CapCutFilter
+import com.example.engine.CapCutFilterEngine
 import com.example.engine.FusionProcessingEngine
 import com.example.engine.FusionProgress
 import com.example.engine.HapticSoundManager
 import com.example.engine.SensorTelemetryManager
 import com.example.engine.TelemetryData
+import com.example.engine.VideoProcessingEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -25,11 +28,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-enum class CameraMode(val title: String) {
-    FUSION_100("100-Frame Fusion"),
-    MOON_MODE("Moon & Sun Mode"),
-    DE_HAZE("De-Haze Clear"),
-    VIDEO_4K("4K 10X Video")
+enum class CameraMode(val title: String, val badge: String, val lensDesc: String) {
+    FUSION_100("10X /HDREAL", "10X FUSION", "64MP + /HDREAL 3.0 Multi-Frame"),
+    POCO_64MP("64MP Ultra HD", "64MP FULL SENSOR", "64MP OIS (9248x6936)"),
+    ULTRA_WIDE_06X("8MP Ultra-Wide", "0.6X 118° FOV", "8MP Ultra-Wide Angle"),
+    MACRO_2MP("2MP Macro", "4cm CLOSE-UP", "2MP Fixed 4cm Focus"),
+    MOON_MODE("Moon Astro", "30X ASTRO", "AI Lunar Crater Super-Res"),
+    VIDEO_4K("4K 10X Video", "4K 60FPS", "MediaCodec AVC + CapCut")
 }
 
 data class CameraUiState(
@@ -45,11 +50,15 @@ data class CameraUiState(
     val lastCapturedPhoto: CapturedPhotoEntity? = null,
     val isRecordingVideo: Boolean = false,
     val videoRecordingSeconds: Int = 0,
-    val simulationSubjectIndex: Int = 0, // 0 = Distant Eagle, 1 = Moon Crater
+    val simulationSubjectIndex: Int = 0, // 0 = Distant Eagle (10X), 1 = Moon Crater, 2 = Macro Dewdrop, 3 = UltraWide Landscape
     val showHdRealPreviewModal: Boolean = false,
     val lastEnhancedBitmap: Bitmap? = null,
     val lastRawBitmap: Bitmap? = null,
-    val hdRealIntensity: Float = 1.5f
+    val hdRealIntensity: Float = 1.5f,
+    val selectedCapCutFilter: CapCutFilter = CapCutFilter.CINEMATIC_TEAL,
+    val capCutFilterIntensity: Float = 1.0f,
+    val showFilterSelector: Boolean = false,
+    val lastSavedVideoMessage: String? = null
 )
 
 class CameraViewModel(application: Application) : AndroidViewModel(application) {
@@ -73,6 +82,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private var videoJob: Job? = null
     private var autoFireCooldown = false
+    @Volatile
+    private var isRecordingActive = false
 
     init {
         telemetryManager.startListening()
@@ -98,8 +109,27 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setZoom(zoom: Float) {
-        val clamped = zoom.coerceIn(0.5f, 30.0f)
-        _uiState.value = _uiState.value.copy(currentZoom = clamped)
+        val clamped = zoom.coerceIn(0.6f, 30.0f)
+        val updatedSubject = when {
+            _uiState.value.activeMode == CameraMode.MACRO_2MP -> 2
+            _uiState.value.activeMode == CameraMode.MOON_MODE -> 1
+            clamped <= 0.65f -> 3 // POCO X6 8MP Ultra-Wide Landscape
+            _uiState.value.simulationSubjectIndex == 3 -> 0 // Switch back from ultra-wide
+            else -> _uiState.value.simulationSubjectIndex
+        }
+        val updatedMode = if (clamped <= 0.65f && _uiState.value.activeMode != CameraMode.VIDEO_4K) {
+            CameraMode.ULTRA_WIDE_06X
+        } else if (_uiState.value.activeMode == CameraMode.ULTRA_WIDE_06X && clamped > 0.65f) {
+            CameraMode.FUSION_100
+        } else {
+            _uiState.value.activeMode
+        }
+
+        _uiState.value = _uiState.value.copy(
+            currentZoom = clamped,
+            simulationSubjectIndex = updatedSubject,
+            activeMode = updatedMode
+        )
         telemetryManager.updateZoom(clamped)
     }
 
@@ -110,10 +140,52 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setMode(mode: CameraMode) {
+        val targetZoom = when (mode) {
+            CameraMode.ULTRA_WIDE_06X -> 0.6f
+            CameraMode.MACRO_2MP -> 1.0f
+            CameraMode.POCO_64MP -> 1.0f
+            CameraMode.FUSION_100 -> if (_uiState.value.currentZoom < 4.5f) 10.0f else _uiState.value.currentZoom
+            CameraMode.MOON_MODE -> if (_uiState.value.currentZoom < 10.0f) 15.0f else _uiState.value.currentZoom
+            CameraMode.VIDEO_4K -> _uiState.value.currentZoom
+        }
+        val targetSubject = when (mode) {
+            CameraMode.MACRO_2MP -> 2 // POCO X6 2MP Macro (4cm)
+            CameraMode.ULTRA_WIDE_06X -> 3 // POCO X6 8MP Ultra-Wide (118°)
+            CameraMode.MOON_MODE -> 1 // 30X Moon Crater
+            else -> 0 // 64MP Main (10X Telephoto / ISZ)
+        }
         _uiState.value = _uiState.value.copy(
             activeMode = mode,
-            simulationSubjectIndex = if (mode == CameraMode.MOON_MODE) 1 else 0
+            currentZoom = targetZoom,
+            simulationSubjectIndex = targetSubject
         )
+        telemetryManager.updateZoom(targetZoom)
+        hapticSoundManager.onZoomStepChanged()
+    }
+
+    fun selectMacroMode() {
+        setMode(CameraMode.MACRO_2MP)
+    }
+
+    fun selectUltraWideMode() {
+        setMode(CameraMode.ULTRA_WIDE_06X)
+    }
+
+    fun select64MpMode() {
+        setMode(CameraMode.POCO_64MP)
+    }
+
+    fun setCapCutFilter(filter: CapCutFilter) {
+        _uiState.value = _uiState.value.copy(selectedCapCutFilter = filter)
+        hapticSoundManager.onZoomStepChanged()
+    }
+
+    fun setCapCutFilterIntensity(intensity: Float) {
+        _uiState.value = _uiState.value.copy(capCutFilterIntensity = intensity.coerceIn(0.1f, 1.0f))
+    }
+
+    fun toggleFilterSelector() {
+        _uiState.value = _uiState.value.copy(showFilterSelector = !_uiState.value.showFilterSelector)
         hapticSoundManager.onZoomStepChanged()
     }
 
@@ -145,34 +217,134 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun toggleSimulationSubject() {
-        val next = (_uiState.value.simulationSubjectIndex + 1) % 2
-        _uiState.value = _uiState.value.copy(simulationSubjectIndex = next)
+        // Cycle: 0 (10X Eagle) -> 1 (30X Moon) -> 2 (2MP Macro 4cm) -> 3 (8MP Ultra-Wide 118°)
+        val next = (_uiState.value.simulationSubjectIndex + 1) % 4
+        val associatedMode = when (next) {
+            1 -> CameraMode.MOON_MODE
+            2 -> CameraMode.MACRO_2MP
+            3 -> CameraMode.ULTRA_WIDE_06X
+            else -> CameraMode.FUSION_100
+        }
+        val targetZoom = when (next) {
+            1 -> 15.0f
+            2 -> 1.0f
+            3 -> 0.6f
+            else -> 10.0f
+        }
+        _uiState.value = _uiState.value.copy(
+            simulationSubjectIndex = next,
+            activeMode = associatedMode,
+            currentZoom = targetZoom
+        )
+        telemetryManager.updateZoom(targetZoom)
+        hapticSoundManager.onZoomStepChanged()
     }
 
     fun closeHdRealPreview() {
         _uiState.value = _uiState.value.copy(showHdRealPreviewModal = false)
     }
 
-    fun toggleVideoRecording() {
+    fun clearSavedVideoMessage() {
+        _uiState.value = _uiState.value.copy(lastSavedVideoMessage = null)
+    }
+
+    /**
+     * Toggles 4K 10X Video Recording with the active CapCut Filter.
+     * Records real MP4 video with frame-by-frame filter and saves to vault.
+     */
+    fun toggleVideoRecording(sourceFrameSupplier: (() -> Bitmap)? = null) {
         val isRecording = _uiState.value.isRecordingVideo
         if (isRecording) {
-            videoJob?.cancel()
-            _uiState.value = _uiState.value.copy(isRecordingVideo = false)
+            // Stop recording
+            isRecordingActive = false
             hapticSoundManager.playShutterEffect()
         } else {
-            _uiState.value = _uiState.value.copy(isRecordingVideo = true, videoRecordingSeconds = 0)
+            // Start recording
+            isRecordingActive = true
             hapticSoundManager.playShutterEffect()
-            videoJob = viewModelScope.launch {
-                while (true) {
-                    delay(1000)
+            _uiState.value = _uiState.value.copy(
+                isRecordingVideo = true,
+                videoRecordingSeconds = 0,
+                lastSavedVideoMessage = null
+            )
+
+            val context = getApplication<Application>()
+            val currentFilter = _uiState.value.selectedCapCutFilter
+            val filterIntensity = _uiState.value.capCutFilterIntensity
+            val zoom = _uiState.value.currentZoom
+
+            val frameSupplier = sourceFrameSupplier ?: {
+                val resId = when {
+                    _uiState.value.activeMode == CameraMode.MACRO_2MP || _uiState.value.simulationSubjectIndex == 2 -> R.drawable.sample_macro
+                    _uiState.value.activeMode == CameraMode.ULTRA_WIDE_06X || _uiState.value.simulationSubjectIndex == 3 || _uiState.value.currentZoom <= 0.65f -> R.drawable.sample_ultrawide
+                    _uiState.value.activeMode == CameraMode.MOON_MODE || _uiState.value.simulationSubjectIndex == 1 -> R.drawable.sample_moon
+                    else -> R.drawable.sample_eagle
+                }
+                BitmapFactory.decodeResource(context.resources, resId)
+            }
+
+            videoJob = viewModelScope.launch(Dispatchers.IO) {
+                // Record video with VideoProcessingEngine
+                val videoPath = VideoProcessingEngine.recordFilteredVideoClip(
+                    context = context,
+                    baseFrameSupplier = frameSupplier,
+                    filter = currentFilter,
+                    filterIntensity = filterIntensity,
+                    zoomLevel = zoom,
+                    isRecordingPredicate = { isRecordingActive },
+                    onProgressUpdate = { sec ->
+                        _uiState.value = _uiState.value.copy(videoRecordingSeconds = sec)
+                    }
+                )
+
+                // Capture thumbnail
+                val base = frameSupplier()
+                val filteredThumb = CapCutFilterEngine.applyFilter(base, currentFilter, filterIntensity)
+                val thumbPath = FusionProcessingEngine.saveBitmapToFile(context, filteredThumb, "video_thumb")
+
+                val duration = _uiState.value.videoRecordingSeconds.coerceAtLeast(1)
+                val tele = telemetry.value
+                val modeDesc = when (_uiState.value.activeMode) {
+                    CameraMode.MACRO_2MP -> "POCO X6 2MP Macro Video"
+                    CameraMode.ULTRA_WIDE_06X -> "POCO X6 8MP Ultra-Wide Video"
+                    CameraMode.POCO_64MP -> "POCO X6 64MP 4K Video"
+                    else -> "4K 10X Video"
+                }
+
+                val videoEntity = CapturedPhotoEntity(
+                    enhancedImagePath = thumbPath,
+                    rawImagePath = thumbPath,
+                    zoomLevel = zoom,
+                    estimatedDistance = tele.distanceDisplay,
+                    fusionFramesCount = duration * 24,
+                    captureMode = "$modeDesc (${currentFilter.displayName})",
+                    stabilityScore = tele.stabilityScore,
+                    hasDehaze = false,
+                    isMoonMode = _uiState.value.activeMode == CameraMode.MOON_MODE,
+                    title = "$modeDesc • ${currentFilter.displayName}",
+                    filterName = currentFilter.displayName,
+                    mediaType = "VIDEO",
+                    videoPath = videoPath,
+                    videoDurationSeconds = duration
+                )
+
+                val id = photoDao.insertPhoto(videoEntity)
+                val savedEntity = videoEntity.copy(id = id)
+
+                withContext(Dispatchers.Main) {
                     _uiState.value = _uiState.value.copy(
-                        videoRecordingSeconds = _uiState.value.videoRecordingSeconds + 1
+                        isRecordingVideo = false,
+                        lastCapturedPhoto = savedEntity,
+                        lastSavedVideoMessage = "4K Video Saved with ${currentFilter.displayName}!"
                     )
                 }
             }
         }
     }
 
+    /**
+     * Triggers 100-Frame Fusion Photo Capture with CapCut Filter + /HDREAL Remaster.
+     */
     fun triggerFusionCapture(sourceBitmap: Bitmap? = null) {
         if (_uiState.value.isProcessingFusion) return
 
@@ -183,31 +355,38 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
             val context = getApplication<Application>()
             val baseBitmap: Bitmap = sourceBitmap ?: run {
-                // If no real camera frame passed, use high-res telephoto sample
-                val resId = if (_uiState.value.activeMode == CameraMode.MOON_MODE || _uiState.value.simulationSubjectIndex == 1) {
-                    R.drawable.sample_moon
-                } else {
-                    R.drawable.sample_eagle
+                val resId = when {
+                    _uiState.value.activeMode == CameraMode.MACRO_2MP || _uiState.value.simulationSubjectIndex == 2 -> R.drawable.sample_macro
+                    _uiState.value.activeMode == CameraMode.ULTRA_WIDE_06X || _uiState.value.simulationSubjectIndex == 3 || _uiState.value.currentZoom <= 0.65f -> R.drawable.sample_ultrawide
+                    _uiState.value.activeMode == CameraMode.MOON_MODE || _uiState.value.simulationSubjectIndex == 1 -> R.drawable.sample_moon
+                    else -> R.drawable.sample_eagle
                 }
                 BitmapFactory.decodeResource(context.resources, resId)
             }
 
             val zoom = _uiState.value.currentZoom
             val isMoon = _uiState.value.activeMode == CameraMode.MOON_MODE
-            val isDehaze = _uiState.value.activeMode == CameraMode.DE_HAZE
+            val activeFilter = _uiState.value.selectedCapCutFilter
+            val filterIntensity = _uiState.value.capCutFilterIntensity
 
             val (rawBmp, enhancedBmp) = FusionProcessingEngine.process100FrameFusion(
                 context = context,
                 baseBitmap = baseBitmap,
                 zoomFactor = zoom,
                 isMoonMode = isMoon,
-                isDehaze = isDehaze
+                isDehaze = false,
+                capCutFilter = activeFilter,
+                filterIntensity = filterIntensity
             ) { progress ->
                 _uiState.value = _uiState.value.copy(fusionProgress = progress)
             }
 
-            // Save Enhanced Image with /HDREAL 3.0 prefix
-            val enhancedPath = FusionProcessingEngine.saveBitmapToFile(context, enhancedBmp, "hdreal_clear_${zoom.toInt()}x")
+            // Save Enhanced Image with filter info
+            val enhancedPath = FusionProcessingEngine.saveBitmapToFile(
+                context,
+                enhancedBmp,
+                "hdreal_${activeFilter.id}_${zoom.toInt()}x"
+            )
 
             // Save RAW telephoto crop
             val rawPath = if (_uiState.value.isSaveRawEnabled) {
@@ -215,11 +394,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             } else null
 
             val currentTele = telemetry.value
+            val filterSuffix = if (activeFilter != CapCutFilter.ORIGINAL) " • ${activeFilter.displayName}" else ""
+            val currentMode = _uiState.value.activeMode
             val titleName = when {
-                zoom >= 10f -> "/HDREAL 3.0 Ultra Clear (10X Telephoto)"
-                zoom >= 5f -> "/HDREAL 3.0 Clear (${zoom.toInt()}X Telephoto)"
-                isMoon -> "10X Moon /HDREAL Astro Shot"
-                else -> "/HDREAL 3.0 (${zoom.toInt()}X)"
+                currentMode == CameraMode.MACRO_2MP -> "POCO X6 2MP Macro (4cm)$filterSuffix"
+                currentMode == CameraMode.ULTRA_WIDE_06X -> "POCO X6 8MP Ultra-Wide 118°$filterSuffix"
+                currentMode == CameraMode.POCO_64MP -> "POCO X6 64MP Ultra HD (9248x6936)$filterSuffix"
+                zoom >= 10f -> "/HDREAL 10X Ultra Clear$filterSuffix"
+                zoom >= 5f -> "/HDREAL 5X Clear$filterSuffix"
+                currentMode == CameraMode.MOON_MODE -> "10X Moon Astro$filterSuffix"
+                else -> "/HDREAL Shot$filterSuffix"
             }
 
             val entity = CapturedPhotoEntity(
@@ -228,11 +412,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 zoomLevel = zoom,
                 estimatedDistance = currentTele.distanceDisplay,
                 fusionFramesCount = 100,
-                captureMode = if (zoom >= 4.5f) "/HDREAL Deep Clear Remaster" else _uiState.value.activeMode.title,
+                captureMode = if (zoom >= 4.5f) "/HDREAL + ${activeFilter.displayName}" else _uiState.value.activeMode.title,
                 stabilityScore = currentTele.stabilityScore,
-                hasDehaze = isDehaze,
+                hasDehaze = false,
                 isMoonMode = isMoon,
-                title = titleName
+                title = titleName,
+                filterName = activeFilter.displayName,
+                mediaType = "IMAGE"
             )
 
             val insertedId = photoDao.insertPhoto(entity)
@@ -243,8 +429,36 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 lastCapturedPhoto = savedEntity,
                 lastEnhancedBitmap = enhancedBmp,
                 lastRawBitmap = rawBmp,
-                showHdRealPreviewModal = (zoom >= 4.5f) // Auto show /HDREAL Before/After sheet for 5X and 10X!
+                showHdRealPreviewModal = (zoom >= 4.5f)
             )
+        }
+    }
+
+    /**
+     * Applies a CapCut Filter to an existing photo in the gallery and saves it as a new version.
+     */
+    fun applyCapCutFilterToExistingPhoto(
+        photo: CapturedPhotoEntity,
+        filter: CapCutFilter,
+        intensity: Float = 1.0f
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val context = getApplication<Application>()
+            val sourceFile = File(photo.enhancedImagePath)
+            if (!sourceFile.exists()) return@launch
+
+            val srcBmp = BitmapFactory.decodeFile(sourceFile.absolutePath) ?: return@launch
+            val filteredBmp = CapCutFilterEngine.applyFilter(srcBmp, filter, intensity)
+
+            val newPath = FusionProcessingEngine.saveBitmapToFile(context, filteredBmp, "capcut_${filter.id}")
+            val updated = photo.copy(
+                id = 0, // Auto-generate new primary key
+                timestamp = System.currentTimeMillis(),
+                enhancedImagePath = newPath,
+                filterName = filter.displayName,
+                title = "${photo.title} (${filter.displayName})"
+            )
+            photoDao.insertPhoto(updated)
         }
     }
 
@@ -260,7 +474,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 zoomFactor = photo.zoomLevel,
                 isMoonMode = photo.isMoonMode,
                 isDehaze = photo.hasDehaze,
-                intensity = 2.2f // 220% Max 8K clarity
+                intensity = 2.2f
             )
 
             val newPath = FusionProcessingEngine.saveBitmapToFile(context, ultraRemastered, "hdreal_max_clear")
@@ -282,6 +496,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         super.onCleared()
         telemetryManager.stopListening()
         hapticSoundManager.release()
+        isRecordingActive = false
         videoJob?.cancel()
     }
 }

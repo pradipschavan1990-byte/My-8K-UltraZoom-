@@ -17,5 +17,9 @@ data class CapturedPhotoEntity(
     val stabilityScore: Int = 96,
     val hasDehaze: Boolean = false,
     val isMoonMode: Boolean = false,
-    val title: String = "UltraZoom 10X Shot"
+    val title: String = "UltraZoom 10X Shot",
+    val filterName: String = "Original",
+    val mediaType: String = "IMAGE", // "IMAGE" or "VIDEO"
+    val videoPath: String? = null,
+    val videoDurationSeconds: Int = 0
 )

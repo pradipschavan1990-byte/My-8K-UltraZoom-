@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -69,6 +71,7 @@ import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.AppDatabase
 import com.example.data.CapturedPhotoEntity
+import com.example.engine.CapCutFilter
 import com.example.engine.FusionProcessingEngine
 import com.example.ui.components.BeforeAfterSlider
 import com.example.ui.theme.CyberGold
@@ -101,6 +104,7 @@ fun PhotoRestoreScreen(
     var targetZoom by remember { mutableFloatStateOf(10.0f) }
     var isDehazeEnabled by remember { mutableStateOf(true) }
     var isMoonModeEnabled by remember { mutableStateOf(false) }
+    var selectedCapCutFilter by remember { mutableStateOf(CapCutFilter.GLOW_FACE) }
     var isProcessing by remember { mutableStateOf(false) }
     var saveSuccessMessage by remember { mutableStateOf(false) }
 
@@ -419,6 +423,45 @@ fun PhotoRestoreScreen(
                     )
                 )
             }
+
+            // CapCut Filter Selection Row
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "CAPCUT VIRAL FILTER: ${selectedCapCutFilter.displayName.uppercase()}",
+                    color = CyberGold,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace
+                )
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(CapCutFilter.entries) { filter ->
+                        val isSelected = selectedCapCutFilter == filter
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) CyberGold.copy(alpha = 0.25f) else DarkGlassSurface)
+                                .border(
+                                    1.dp,
+                                    if (isSelected) CyberGold else DarkGlassBorder,
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .clickable { selectedCapCutFilter = filter }
+                                .padding(horizontal = 8.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                text = filter.displayName,
+                                color = if (isSelected) CyberGold else Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         // Action Trigger Button: AI RESTORE 10X
@@ -433,7 +476,8 @@ fun PhotoRestoreScreen(
                         baseBitmap = bmp,
                         zoomFactor = targetZoom,
                         isMoonMode = isMoonModeEnabled,
-                        isDehaze = isDehazeEnabled
+                        isDehaze = isDehazeEnabled,
+                        capCutFilter = selectedCapCutFilter
                     )
                     rawOriginalBitmap = raw
                     enhancedResultBitmap = enhanced
@@ -455,7 +499,7 @@ fun PhotoRestoreScreen(
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = "RUN /HDREAL 3.0 AI DEEP RESTORATION",
+                text = "RUN /HDREAL + ${selectedCapCutFilter.displayName.uppercase()}",
                 color = ObsidianBlack,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
@@ -470,7 +514,7 @@ fun PhotoRestoreScreen(
                     coroutineScope.launch(Dispatchers.IO) {
                         val enhanced = enhancedResultBitmap ?: return@launch
                         val raw = rawOriginalBitmap
-                        val enhancedPath = FusionProcessingEngine.saveBitmapToFile(context, enhanced, "restored_100x")
+                        val enhancedPath = FusionProcessingEngine.saveBitmapToFile(context, enhanced, "restored_${selectedCapCutFilter.id}")
                         val rawPath = raw?.let { FusionProcessingEngine.saveBitmapToFile(context, it, "restored_raw") }
 
                         val entity = CapturedPhotoEntity(
@@ -479,11 +523,13 @@ fun PhotoRestoreScreen(
                             zoomLevel = targetZoom,
                             estimatedDistance = "Restored Photo",
                             fusionFramesCount = 100,
-                            captureMode = "10X Old Photo Restore",
+                            captureMode = "10X Restore (${selectedCapCutFilter.displayName})",
                             stabilityScore = 99,
                             hasDehaze = isDehazeEnabled,
                             isMoonMode = isMoonModeEnabled,
-                            title = "AI Restored Photo"
+                            title = "AI Restored • ${selectedCapCutFilter.displayName}",
+                            filterName = selectedCapCutFilter.displayName,
+                            mediaType = "IMAGE"
                         )
                         val db = AppDatabase.getDatabase(context)
                         db.photoDao().insertPhoto(entity)

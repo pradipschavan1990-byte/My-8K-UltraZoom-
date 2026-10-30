@@ -12,9 +12,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CenterFocusWeak
 import androidx.compose.material.icons.filled.SyncAlt
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
@@ -39,24 +41,41 @@ import com.example.ui.theme.NeonGreen
 import com.example.ui.theme.ObsidianBlack
 import kotlin.math.roundToInt
 
+data class PocoLensPreset(
+    val zoom: Float,
+    val label: String,
+    val subLabel: String,
+    val isMacro: Boolean = false
+)
+
 @Composable
 fun ZoomDialSlider(
     zoomLevel: Float,
+    isMacroActive: Boolean = false,
     onZoomChanged: (Float) -> Unit,
+    onMacroClicked: () -> Unit = {},
     onQuickSwitch: () -> Unit,
     onStepHaptic: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val presets = listOf(0.5f, 1.0f, 2.0f, 5.0f, 10.0f, 30.0f)
+    // Tailored for POCO X6 Camera Hardware Setup (64MP Main + 8MP UW + 2MP Macro)
+    val presets = listOf(
+        PocoLensPreset(0.6f, "0.6X", "8MP UW"),
+        PocoLensPreset(1.0f, "1X", "64MP"),
+        PocoLensPreset(2.0f, "2X", "ISZ"),
+        PocoLensPreset(5.0f, "5X", "AI"),
+        PocoLensPreset(10.0f, "10X", "/HDREAL"),
+        PocoLensPreset(1.0f, "4cm", "MACRO", isMacro = true)
+    )
 
     Column(
         modifier = modifier
             .testTag("zoom_dial_slider_container")
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Quick Zoom Preset Buttons & 1X <-> 10X Toggle
+        // POCO X6 Lens Presets & 1X <-> 10X Quick Switch
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -66,46 +85,71 @@ fun ZoomDialSlider(
         ) {
             // Presets row
             Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 presets.forEach { preset ->
-                    val isSelected = (zoomLevel - preset).let { it >= -0.3f && it <= 0.3f }
-                    val isSuperZoom = preset >= 10.0f
+                    val isSelected = if (preset.isMacro) {
+                        isMacroActive
+                    } else {
+                        !isMacroActive && (zoomLevel - preset.zoom).let { it >= -0.25f && it <= 0.25f }
+                    }
+
+                    val isSuperZoom = preset.zoom >= 10.0f
+                    val isMacro = preset.isMacro
 
                     Box(
                         modifier = Modifier
-                            .testTag("zoom_preset_${preset.toInt()}x")
-                            .clip(CircleShape)
+                            .testTag(if (preset.isMacro) "lens_preset_macro" else "zoom_preset_${preset.zoom}x")
+                            .clip(RoundedCornerShape(12.dp))
                             .background(
                                 when {
-                                    isSelected -> if (isSuperZoom) CyberGold else NeonCyan
+                                    isSelected -> if (isMacro) NeonGreen else if (isSuperZoom) CyberGold else NeonCyan
                                     else -> DarkGlassSurface.copy(alpha = 0.85f)
                                 }
                             )
                             .border(
                                 width = 1.dp,
                                 color = if (isSelected) Color.White else DarkGlassBorder,
-                                shape = CircleShape
+                                shape = RoundedCornerShape(12.dp)
                             )
                             .clickable {
-                                onZoomChanged(preset)
+                                if (preset.isMacro) {
+                                    onMacroClicked()
+                                } else {
+                                    onZoomChanged(preset.zoom)
+                                }
                                 onStepHaptic()
                             }
-                            .padding(horizontal = 9.dp, vertical = 5.dp),
+                            .padding(horizontal = 7.dp, vertical = 4.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = if (preset == 0.5f) "0.5X" else "${preset.toInt()}X",
-                            color = when {
-                                isSelected -> ObsidianBlack
-                                isSuperZoom -> CyberGold
-                                else -> Color.White
-                            },
-                            fontSize = 11.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            fontFamily = FontFamily.Monospace
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(1.dp)
+                        ) {
+                            Text(
+                                text = preset.label,
+                                color = when {
+                                    isSelected -> ObsidianBlack
+                                    isMacro -> NeonGreen
+                                    isSuperZoom -> CyberGold
+                                    else -> Color.White
+                                },
+                                fontSize = 10.5.sp,
+                                fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Text(
+                                text = preset.subLabel,
+                                color = when {
+                                    isSelected -> ObsidianBlack.copy(alpha = 0.8f)
+                                    else -> Color.White.copy(alpha = 0.55f)
+                                },
+                                fontSize = 7.5.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
                     }
                 }
             }
@@ -114,14 +158,14 @@ fun ZoomDialSlider(
             Box(
                 modifier = Modifier
                     .testTag("quick_switch_1x_10x")
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(14.dp))
                     .background(DarkGlassCard)
-                    .border(1.dp, CyberGold.copy(alpha = 0.8f), RoundedCornerShape(16.dp))
+                    .border(1.dp, CyberGold.copy(alpha = 0.8f), RoundedCornerShape(14.dp))
                     .clickable {
                         onQuickSwitch()
                         onStepHaptic()
                     }
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                    .padding(horizontal = 9.dp, vertical = 6.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Row(
@@ -135,7 +179,7 @@ fun ZoomDialSlider(
                         modifier = Modifier.size(13.dp)
                     )
                     Text(
-                        text = if (zoomLevel >= 8f) "JUMP 1X" else "10X ZOOM",
+                        text = if (zoomLevel >= 8f) "1X 64M" else "10X HD",
                         color = CyberGold,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
@@ -149,12 +193,12 @@ fun ZoomDialSlider(
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(
-                text = "0.5X",
+                text = "0.6X",
                 color = Color.White.copy(alpha = 0.5f),
-                fontSize = 10.sp,
+                fontSize = 9.5.sp,
                 fontFamily = FontFamily.Monospace
             )
 
@@ -167,7 +211,7 @@ fun ZoomDialSlider(
                     }
                     onZoomChanged(rounded)
                 },
-                valueRange = 0.5f..30.0f,
+                valueRange = 0.6f..30.0f,
                 colors = SliderDefaults.colors(
                     thumbColor = if (zoomLevel >= 10f) CyberGold else NeonCyan,
                     activeTrackColor = if (zoomLevel >= 10f) CyberGold else NeonCyan,
@@ -178,18 +222,18 @@ fun ZoomDialSlider(
                     .testTag("continuous_zoom_slider")
             )
 
-            // Current magnification badge
+            // Current magnification & Sensor description badge
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(6.dp))
                     .background(DarkGlassSurface)
                     .border(1.dp, if (zoomLevel >= 10f) CyberGold else NeonCyan, RoundedCornerShape(6.dp))
-                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                    .padding(horizontal = 7.dp, vertical = 3.dp)
             ) {
                 Text(
                     text = String.format("%.1fX", zoomLevel),
                     color = if (zoomLevel >= 10f) CyberGold else NeonCyan,
-                    fontSize = 12.sp,
+                    fontSize = 11.5.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace
                 )

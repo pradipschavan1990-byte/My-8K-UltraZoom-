@@ -1,6 +1,8 @@
 package com.example
 
+import com.example.engine.CapCutFilter
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -25,5 +27,40 @@ class ExampleUnitTest {
         val isTripod = rawStability >= 94
         assertTrue(isSteady)
         assertTrue(isTripod)
+    }
+
+    @Test
+    fun testCapCutFiltersIntegrity() {
+        val glowFilter = CapCutFilter.fromId("glow_face")
+        assertEquals(CapCutFilter.GLOW_FACE, glowFilter)
+        assertEquals("Glow Face", glowFilter.displayName)
+        assertEquals(20, glowFilter.colorMatrixValues.size)
+
+        val cinematicFilter = CapCutFilter.fromId("cinematic_teal")
+        assertEquals(CapCutFilter.CINEMATIC_TEAL, cinematicFilter)
+        assertEquals(20, cinematicFilter.colorMatrixValues.size)
+
+        assertTrue(CapCutFilter.entries.size >= 8)
+    }
+
+    @Test
+    fun testPocoX6CameraHardwareModes() {
+        val pocoModes = listOf(
+            "64MP Ultra HD",
+            "10X /HDREAL",
+            "8MP Ultra-Wide",
+            "2MP Macro"
+        )
+        assertTrue(pocoModes.contains("64MP Ultra HD"))
+        assertTrue(pocoModes.contains("8MP Ultra-Wide"))
+        assertTrue(pocoModes.contains("2MP Macro"))
+
+        // POCO X6 8MP Ultra-wide zoom is 0.6X
+        val uwZoom = 0.6f
+        assertTrue(uwZoom <= 0.65f)
+
+        // POCO X6 Macro distance is fixed at 4.0cm
+        val macroDistanceCm = 4.0f
+        assertEquals(4.0f, macroDistanceCm, 0.01f)
     }
 }

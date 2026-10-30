@@ -34,6 +34,8 @@ object FusionProcessingEngine {
         zoomFactor: Float,
         isMoonMode: Boolean = false,
         isDehaze: Boolean = false,
+        capCutFilter: CapCutFilter = CapCutFilter.ORIGINAL,
+        filterIntensity: Float = 1.0f,
         onProgress: (FusionProgress) -> Unit = {}
     ): Pair<Bitmap, Bitmap> = withContext(Dispatchers.Default) {
         // Step 1: Telephoto Crop Extraction
@@ -43,6 +45,7 @@ object FusionProcessingEngine {
         // Step 2: 100-Burst Frame Simulation & /HDREAL Neural Remaster Progress
         val totalBurst = 100
         val burstInterval = 10
+        val filterName = if (capCutFilter != CapCutFilter.ORIGINAL) " • ${capCutFilter.displayName}" else ""
         for (i in 1..totalBurst step burstInterval) {
             delay(14)
             val currentFrame = min(i + burstInterval - 1, totalBurst)
@@ -50,8 +53,8 @@ object FusionProcessingEngine {
                 currentFrame <= 25 -> "Capturing 100-Frame Telephoto RAW..."
                 currentFrame <= 50 -> "AI Sub-Pixel Optical Registration..."
                 currentFrame <= 75 -> "/HDREAL Deep Blur Removal & Denoise..."
-                currentFrame <= 90 -> if (isMoonMode) "/HDREAL Lunar Crater & Maria Reconstruction..." else if (isDehaze) "/HDREAL Atmospheric De-Haze Filter..." else "/HDREAL 3.0 Edge & Micro-Texture Synthesis..."
-                else -> "/HDREAL 8K Ultra Clarity Remaster Complete!"
+                currentFrame <= 90 -> if (isMoonMode) "/HDREAL Lunar Crater & Maria Reconstruction..." else if (isDehaze) "/HDREAL Atmospheric De-Haze Filter..." else "/HDREAL 3.0$filterName Synthesis..."
+                else -> "/HDREAL 8K Ultra Clarity$filterName Remaster Complete!"
             }
             onProgress(FusionProgress(currentFrame, totalBurst, stageName, currentFrame / 100f))
         }
@@ -72,8 +75,15 @@ object FusionProcessingEngine {
             }
         )
 
-        onProgress(FusionProgress(100, 100, "/HDREAL 3.0 Ultra HD Remaster Complete!", 1.0f))
-        Pair(rawCopy, hdRealEnhanced)
+        // Step 4: Apply CapCut Viral Filter (Cinematic Teal, Glow Face, Cyberpunk, etc.)
+        val finalOutput = if (capCutFilter != CapCutFilter.ORIGINAL) {
+            CapCutFilterEngine.applyFilter(hdRealEnhanced, capCutFilter, filterIntensity)
+        } else {
+            hdRealEnhanced
+        }
+
+        onProgress(FusionProgress(100, 100, "/HDREAL 3.0$filterName Ultra HD Remaster Complete!", 1.0f))
+        Pair(rawCopy, finalOutput)
     }
 
     /**
@@ -90,7 +100,6 @@ object FusionProcessingEngine {
         val origH = baseBitmap.height
 
         // Calculate telephoto crop window
-        // Smooth scaling factor based on zoom
         val cropFactor = (1.0f / (1.0f + (zoomFactor - 1.0f) * 0.35f)).coerceIn(0.18f, 1.0f)
         val cropW = (origW * cropFactor).roundToInt().coerceIn(60, origW)
         val cropH = (origH * cropFactor).roundToInt().coerceIn(60, origH)
@@ -131,7 +140,6 @@ object FusionProcessingEngine {
 
         val cm = ColorMatrix()
         if (isMoonMode) {
-            // High contrast for craters, deep blacks for outer space
             val contrast = 1.75f * intensity.coerceAtLeast(1f)
             val brightness = -20f
             cm.set(floatArrayOf(
@@ -141,7 +149,6 @@ object FusionProcessingEngine {
                 0f, 0f, 0f, 1f, 0f
             ))
         } else if (isDehaze) {
-            // Cut through distant haze, fog, dust
             cm.setSaturation(1.4f)
             val contrastCm = ColorMatrix(floatArrayOf(
                 1.38f * intensity.coerceAtLeast(1f), 0f, 0f, 0f, -22f,
@@ -151,7 +158,6 @@ object FusionProcessingEngine {
             ))
             cm.postConcat(contrastCm)
         } else {
-            // ChatGPT /HDREAL Signature: Vibrant clarity, deep micro-blacks, rich textures
             cm.setSaturation(1.28f)
             val clarityCm = ColorMatrix(floatArrayOf(
                 1.26f * intensity.coerceAtLeast(1f), 0f, 0f, 0f, -12f,
@@ -173,10 +179,6 @@ object FusionProcessingEngine {
         return sharpened
     }
 
-    /**
-     * Advanced Convolution filter that performs edge reconstruction without noise blooming.
-     * Uses adaptive Laplacian edge detection combined with unsharp masking.
-     */
     fun applyHDRealConvolution(src: Bitmap, strength: Float): Bitmap {
         val width = src.width
         val height = src.height
@@ -203,13 +205,11 @@ object FusionProcessingEngine {
                 val gCenter = Color.green(cCenter)
                 val bCenter = Color.blue(cCenter)
 
-                // Edge gradient magnitude
                 val rDiff = abs(rCenter - Color.red(cTop)) + abs(rCenter - Color.red(cBottom))
                 val gDiff = abs(gCenter - Color.green(cTop)) + abs(gCenter - Color.green(cBottom))
                 val bDiff = abs(bCenter - Color.blue(cTop)) + abs(bCenter - Color.blue(cBottom))
                 val edgeMagnitude = (rDiff + gDiff + bDiff) / 3
 
-                // Adaptive boost: edges receive sharp contrast, smooth areas remain noise-free
                 val effectiveBoost = if (edgeMagnitude > 18) strength else (strength * 0.5f)
                 val curCenterWeight = 1f + 4f * effectiveBoost
                 val curEdgeWeight = -effectiveBoost
@@ -227,7 +227,6 @@ object FusionProcessingEngine {
             }
         }
 
-        // Copy borders
         for (x in 0 until width) {
             outPixels[x] = pixels[x]
             outPixels[(height - 1) * width + x] = pixels[(height - 1) * width + x]

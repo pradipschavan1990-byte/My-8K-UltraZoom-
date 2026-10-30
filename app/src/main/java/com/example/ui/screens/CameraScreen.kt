@@ -32,10 +32,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CenterFocusStrong
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.Filter
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Tune
@@ -64,6 +67,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -77,6 +82,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.example.R
+import com.example.engine.CapCutFilter
+import com.example.ui.components.CapCutFilterBar
 import com.example.ui.components.DistanceMeterOverlay
 import com.example.ui.components.DualZoomPipWindow
 import com.example.ui.components.HdRealResultSheet
@@ -132,40 +139,61 @@ fun CameraScreen(
     ) {
         // 1. Live Camera Viewfinder or Simulation Engine
         if (hasCameraPermission) {
-            AndroidView(
-                factory = { ctx ->
-                    val previewView = PreviewView(ctx)
-                    val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                    cameraProviderFuture.addListener({
-                        try {
-                            val cameraProvider = cameraProviderFuture.get()
-                            val preview = Preview.Builder().build().also {
-                                it.setSurfaceProvider(previewView.surfaceProvider)
+            Box(modifier = Modifier.fillMaxSize()) {
+                AndroidView(
+                    factory = { ctx ->
+                        val previewView = PreviewView(ctx)
+                        val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                        cameraProviderFuture.addListener({
+                            try {
+                                val cameraProvider = cameraProviderFuture.get()
+                                val preview = Preview.Builder().build().also {
+                                    it.setSurfaceProvider(previewView.surfaceProvider)
+                                }
+                                val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+                                cameraProvider.unbindAll()
+                                val camera = cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview)
+                                camera.cameraControl.setZoomRatio(uiState.currentZoom.coerceIn(1f, 8f))
+                            } catch (e: Exception) {
+                                e.printStackTrace()
                             }
-                            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-                            cameraProvider.unbindAll()
-                            val camera = cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview)
-                            // Set zoom ratio on camera control
-                            camera.cameraControl.setZoomRatio(uiState.currentZoom.coerceIn(1f, 8f))
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                        }
-                    }, ContextCompat.getMainExecutor(ctx))
-                    previewView
-                },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .testTag("camera_preview_view")
-            )
+                        }, ContextCompat.getMainExecutor(ctx))
+                        previewView
+                    },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .testTag("camera_preview_view")
+                )
+
+                // Live CapCut Filter tint overlay on real camera preview
+                if (uiState.selectedCapCutFilter != CapCutFilter.ORIGINAL) {
+                    val tintColor = when (uiState.selectedCapCutFilter) {
+                        CapCutFilter.CINEMATIC_TEAL -> Color(0xFF00E5FF).copy(alpha = 0.09f)
+                        CapCutFilter.GLOW_FACE -> Color(0xFFFFE0B2).copy(alpha = 0.12f)
+                        CapCutFilter.CYBERPUNK -> Color(0xFFE040FB).copy(alpha = 0.11f)
+                        CapCutFilter.GOLDEN_HOUR -> Color(0xFFFFB300).copy(alpha = 0.13f)
+                        CapCutFilter.VINTAGE_35MM -> Color(0xFFFFD54F).copy(alpha = 0.10f)
+                        CapCutFilter.ANIME_PASTEL -> Color(0xFF80D8FF).copy(alpha = 0.09f)
+                        CapCutFilter.SUNSET_PEACH -> Color(0xFFFF80AB).copy(alpha = 0.11f)
+                        CapCutFilter.MOODY_NOIR -> Color(0xFF000000).copy(alpha = 0.15f)
+                        else -> Color.Transparent
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(tintColor)
+                    )
+                }
+            }
         } else {
             // High-Res Telephoto Simulator Scene
-            val sampleResId = if (uiState.activeMode == CameraMode.MOON_MODE || uiState.simulationSubjectIndex == 1) {
-                R.drawable.sample_moon
-            } else {
-                R.drawable.sample_eagle
+            val sampleResId = when {
+                uiState.activeMode == CameraMode.MACRO_2MP || uiState.simulationSubjectIndex == 2 -> R.drawable.sample_macro
+                uiState.activeMode == CameraMode.ULTRA_WIDE_06X || uiState.simulationSubjectIndex == 3 || uiState.currentZoom <= 0.65f -> R.drawable.sample_ultrawide
+                uiState.activeMode == CameraMode.MOON_MODE || uiState.simulationSubjectIndex == 1 -> R.drawable.sample_moon
+                else -> R.drawable.sample_eagle
             }
 
-            // Real-time Zoom scaling with AI Tripod Gimbal Offset
             val zoomScale = (1.0f + (uiState.currentZoom - 1.0f) * 0.18f).coerceIn(1.0f, 6.0f)
             val driftX = if (uiState.isTripodLockEnabled) telemetry.driftOffsetX else 0f
             val driftY = if (uiState.isTripodLockEnabled) telemetry.driftOffsetY else 0f
@@ -176,10 +204,16 @@ fun CameraScreen(
                     .offset { IntOffset(driftX.roundToInt(), driftY.roundToInt()) },
                 contentAlignment = Alignment.Center
             ) {
+                // Live CapCut Filter applied directly to simulation viewfinder!
+                val colorFilter = if (uiState.selectedCapCutFilter != CapCutFilter.ORIGINAL) {
+                    ColorFilter.colorMatrix(ColorMatrix(uiState.selectedCapCutFilter.colorMatrixValues))
+                } else null
+
                 Image(
                     painter = painterResource(id = sampleResId),
                     contentDescription = "Ultra Zoom Telephoto Subject",
                     contentScale = ContentScale.Crop,
+                    colorFilter = colorFilter,
                     modifier = Modifier
                         .fillMaxSize()
                         .scale(zoomScale)
@@ -188,27 +222,49 @@ fun CameraScreen(
             }
         }
 
-        // Viewfinder Grid Overlay lines
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(bottom = 180.dp, top = 120.dp)
-        )
-
         // 2. Sniper Stabilizer Ring (Active when Zoom >= 5X)
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(bottom = 120.dp),
+                .padding(bottom = 140.dp),
             contentAlignment = Alignment.Center
         ) {
-            SniperStabilizerRing(
-                stabilityScore = telemetry.stabilityScore,
-                isSniperSteady = telemetry.isSniperSteady,
-                driftOffsetX = telemetry.driftOffsetX,
-                driftOffsetY = telemetry.driftOffsetY,
-                zoomLevel = uiState.currentZoom
-            )
+            if (uiState.activeMode == CameraMode.MACRO_2MP) {
+                // POCO X6 2MP Macro 4cm Focus Target Reticle
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(100.dp)
+                            .border(2.dp, NeonGreen, CircleShape)
+                            .padding(8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(14.dp)
+                                .border(1.5.dp, NeonGreen, CircleShape)
+                        )
+                    }
+                    Text(
+                        text = "4cm MACRO FOCUS LOCKED",
+                        color = NeonGreen,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            } else {
+                SniperStabilizerRing(
+                    stabilityScore = telemetry.stabilityScore,
+                    isSniperSteady = telemetry.isSniperSteady,
+                    driftOffsetX = telemetry.driftOffsetX,
+                    driftOffsetY = telemetry.driftOffsetY,
+                    zoomLevel = uiState.currentZoom
+                )
+            }
         }
 
         // 3. Top HUD: Telemetry & Controls
@@ -216,11 +272,40 @@ fun CameraScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.TopCenter)
-                .background(ObsidianBlack.copy(alpha = 0.85f))
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .background(ObsidianBlack.copy(alpha = 0.88f))
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            // Mode Tabs (100-FRAME FUSION | MOON MODE | DE-HAZE | 4K VIDEO)
+            // POCO X6 Hardware Indicator Line
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "POCO X6 5G • TRIPLE CAM",
+                    color = CyberGold,
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace
+                )
+                Text(
+                    text = uiState.activeMode.lensDesc,
+                    color = when (uiState.activeMode) {
+                        CameraMode.MACRO_2MP -> NeonGreen
+                        CameraMode.ULTRA_WIDE_06X -> NeonCyan
+                        CameraMode.POCO_64MP -> CyberGold
+                        else -> Color.White.copy(alpha = 0.8f)
+                    },
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+
+            // Mode Tabs (10X /HDREAL | 64MP | 8MP UW | 2MP MACRO | MOON | 4K VIDEO)
             val modes = CameraMode.entries
             ScrollableTabRow(
                 selectedTabIndex = modes.indexOf(uiState.activeMode),
@@ -296,46 +381,55 @@ fun CameraScreen(
                     }
                 }
 
+                // Active CapCut Filter indicator pill
+                Box(
+                    modifier = Modifier
+                        .testTag("toggle_filter_pill")
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(if (uiState.selectedCapCutFilter != CapCutFilter.ORIGINAL) CyberGold.copy(alpha = 0.25f) else DarkGlassCard)
+                        .border(
+                            1.dp,
+                            if (uiState.selectedCapCutFilter != CapCutFilter.ORIGINAL) CyberGold else DarkGlassBorder,
+                            RoundedCornerShape(14.dp)
+                        )
+                        .clickable { viewModel.toggleFilterSelector() }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = "CapCut Filter",
+                            tint = if (uiState.selectedCapCutFilter != CapCutFilter.ORIGINAL) CyberGold else Color.White.copy(alpha = 0.6f),
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = uiState.selectedCapCutFilter.displayName.uppercase(),
+                            color = if (uiState.selectedCapCutFilter != CapCutFilter.ORIGINAL) CyberGold else Color.White.copy(alpha = 0.8f),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+
                 // RAW + AI Toggle
                 Box(
                     modifier = Modifier
                         .testTag("toggle_save_raw")
                         .clip(RoundedCornerShape(14.dp))
-                        .background(if (uiState.isSaveRawEnabled) CyberGold.copy(alpha = 0.2f) else DarkGlassCard)
+                        .background(if (uiState.isSaveRawEnabled) NeonGreen.copy(alpha = 0.2f) else DarkGlassCard)
                         .border(
                             1.dp,
-                            if (uiState.isSaveRawEnabled) CyberGold else DarkGlassBorder,
+                            if (uiState.isSaveRawEnabled) NeonGreen else DarkGlassBorder,
                             RoundedCornerShape(14.dp)
                         )
                         .clickable { viewModel.toggleSaveRaw() }
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Text(
-                        text = if (uiState.isSaveRawEnabled) "RAW + AI [ON]" else "RAW [OFF]",
-                        color = if (uiState.isSaveRawEnabled) CyberGold else Color.White.copy(alpha = 0.5f),
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-
-                // Auto-Fire Sniper Toggle
-                Box(
-                    modifier = Modifier
-                        .testTag("toggle_auto_fire")
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(if (uiState.isSniperAutoFireEnabled) NeonGreen.copy(alpha = 0.2f) else DarkGlassCard)
-                        .border(
-                            1.dp,
-                            if (uiState.isSniperAutoFireEnabled) NeonGreen else DarkGlassBorder,
-                            RoundedCornerShape(14.dp)
-                        )
-                        .clickable { viewModel.toggleSniperAutoFire() }
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = if (uiState.isSniperAutoFireEnabled) "AUTO-FIRE ON" else "AUTO-FIRE",
-                        color = if (uiState.isSniperAutoFireEnabled) NeonGreen else Color.White.copy(alpha = 0.5f),
+                        text = if (uiState.isSaveRawEnabled) "RAW+AI ON" else "RAW OFF",
+                        color = if (uiState.isSaveRawEnabled) NeonGreen else Color.White.copy(alpha = 0.5f),
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace
@@ -382,14 +476,13 @@ fun CameraScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.Top
         ) {
-            // Distance Depth Meter Overlay
             DistanceMeterOverlay(
                 telemetry = telemetry,
                 zoomLevel = uiState.currentZoom,
-                isTripodLockEnabled = uiState.isTripodLockEnabled
+                isTripodLockEnabled = uiState.isTripodLockEnabled,
+                activeMode = uiState.activeMode
             )
 
-            // Dual Zoom PiP Window
             DualZoomPipWindow(
                 isVisible = uiState.isPipOverviewVisible,
                 currentZoom = uiState.currentZoom,
@@ -411,8 +504,14 @@ fun CameraScreen(
                     .padding(horizontal = 8.dp, vertical = 6.dp)
                     .testTag("switch_subject_button")
             ) {
+                val subjectLabel = when (uiState.simulationSubjectIndex) {
+                    1 -> "TARGET: MOON (30X)"
+                    2 -> "TARGET: 4cm MACRO"
+                    3 -> "TARGET: 118° ULTRA-WIDE"
+                    else -> "TARGET: 10X EAGLE"
+                }
                 Text(
-                    text = if (uiState.simulationSubjectIndex == 0) "TARGET: EAGLE (10X)" else "TARGET: MOON (30X)",
+                    text = subjectLabel,
                     color = CyberGold,
                     fontSize = 9.sp,
                     fontWeight = FontWeight.Bold,
@@ -421,20 +520,63 @@ fun CameraScreen(
             }
         }
 
-        // 5. Bottom Control Deck (Zoom Slider + Shutter + Vault)
+        // Video Saved Confirmation Banner
+        if (uiState.lastSavedVideoMessage != null) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 175.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(NeonGreen.copy(alpha = 0.95f))
+                    .clickable {
+                        viewModel.clearSavedVideoMessage()
+                        onNavigateToGallery()
+                    }
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = "Success",
+                        tint = ObsidianBlack,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "${uiState.lastSavedVideoMessage} • TAP TO VIEW",
+                        color = ObsidianBlack,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+        }
+
+        // 5. Bottom Control Deck (CapCut Filter Carousel + Zoom Slider + Shutter + Vault)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
-                .background(ObsidianBlack.copy(alpha = 0.92f))
-                .padding(bottom = 20.dp, top = 8.dp),
+                .background(ObsidianBlack.copy(alpha = 0.94f))
+                .padding(bottom = 16.dp, top = 6.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // Zoom Slider with Vibration Haptic Feedbacks & Quick switch
+            // CapCut Viral Filters Horizontal Carousel
+            CapCutFilterBar(
+                selectedFilter = uiState.selectedCapCutFilter,
+                intensity = uiState.capCutFilterIntensity,
+                onFilterSelected = { viewModel.setCapCutFilter(it) },
+                onIntensityChanged = { viewModel.setCapCutFilterIntensity(it) }
+            )
+
+            // Zoom Dial Slider
             ZoomDialSlider(
                 zoomLevel = uiState.currentZoom,
+                isMacroActive = (uiState.activeMode == CameraMode.MACRO_2MP),
                 onZoomChanged = { viewModel.setZoom(it) },
+                onMacroClicked = { viewModel.selectMacroMode() },
                 onQuickSwitch = { viewModel.quickSwitch1X10X() },
                 onStepHaptic = { viewModel.hapticSoundManager.onZoomStepChanged() }
             )
@@ -546,7 +688,7 @@ fun CameraScreen(
                             "%02d:%02d",
                             uiState.videoRecordingSeconds / 60,
                             uiState.videoRecordingSeconds % 60
-                        ) + " • AI GYRO STABILIZED",
+                        ) + " • ${uiState.selectedCapCutFilter.displayName.uppercase()}",
                         color = Color.White,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
