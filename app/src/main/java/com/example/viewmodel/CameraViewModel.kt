@@ -13,6 +13,7 @@ import com.example.engine.FusionProgress
 import com.example.engine.HapticSoundManager
 import com.example.engine.SensorTelemetryManager
 import com.example.engine.TelemetryData
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +22,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 enum class CameraMode(val title: String) {
     FUSION_100("100-Frame Fusion"),
@@ -42,7 +45,11 @@ data class CameraUiState(
     val lastCapturedPhoto: CapturedPhotoEntity? = null,
     val isRecordingVideo: Boolean = false,
     val videoRecordingSeconds: Int = 0,
-    val simulationSubjectIndex: Int = 0 // 0 = Distant Eagle, 1 = Moon Crater
+    val simulationSubjectIndex: Int = 0, // 0 = Distant Eagle, 1 = Moon Crater
+    val showHdRealPreviewModal: Boolean = false,
+    val lastEnhancedBitmap: Bitmap? = null,
+    val lastRawBitmap: Bitmap? = null,
+    val hdRealIntensity: Float = 1.5f
 )
 
 class CameraViewModel(application: Application) : AndroidViewModel(application) {
@@ -142,6 +149,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.value = _uiState.value.copy(simulationSubjectIndex = next)
     }
 
+    fun closeHdRealPreview() {
+        _uiState.value = _uiState.value.copy(showHdRealPreviewModal = false)
+    }
+
     fun toggleVideoRecording() {
         val isRecording = _uiState.value.isRecordingVideo
         if (isRecording) {
@@ -181,39 +192,47 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 BitmapFactory.decodeResource(context.resources, resId)
             }
 
+            val zoom = _uiState.value.currentZoom
             val isMoon = _uiState.value.activeMode == CameraMode.MOON_MODE
             val isDehaze = _uiState.value.activeMode == CameraMode.DE_HAZE
 
             val (rawBmp, enhancedBmp) = FusionProcessingEngine.process100FrameFusion(
                 context = context,
                 baseBitmap = baseBitmap,
-                zoomFactor = _uiState.value.currentZoom,
+                zoomFactor = zoom,
                 isMoonMode = isMoon,
                 isDehaze = isDehaze
             ) { progress ->
                 _uiState.value = _uiState.value.copy(fusionProgress = progress)
             }
 
-            // Save Enhanced Image
-            val enhancedPath = FusionProcessingEngine.saveBitmapToFile(context, enhancedBmp, "enhanced_100x")
+            // Save Enhanced Image with /HDREAL 3.0 prefix
+            val enhancedPath = FusionProcessingEngine.saveBitmapToFile(context, enhancedBmp, "hdreal_clear_${zoom.toInt()}x")
 
-            // Save RAW if enabled
+            // Save RAW telephoto crop
             val rawPath = if (_uiState.value.isSaveRawEnabled) {
-                FusionProcessingEngine.saveBitmapToFile(context, rawBmp, "raw_sensor")
+                FusionProcessingEngine.saveBitmapToFile(context, rawBmp, "raw_telephoto_${zoom.toInt()}x")
             } else null
 
             val currentTele = telemetry.value
+            val titleName = when {
+                zoom >= 10f -> "/HDREAL 3.0 Ultra Clear (10X Telephoto)"
+                zoom >= 5f -> "/HDREAL 3.0 Clear (${zoom.toInt()}X Telephoto)"
+                isMoon -> "10X Moon /HDREAL Astro Shot"
+                else -> "/HDREAL 3.0 (${zoom.toInt()}X)"
+            }
+
             val entity = CapturedPhotoEntity(
                 enhancedImagePath = enhancedPath,
                 rawImagePath = rawPath,
-                zoomLevel = _uiState.value.currentZoom,
+                zoomLevel = zoom,
                 estimatedDistance = currentTele.distanceDisplay,
                 fusionFramesCount = 100,
-                captureMode = _uiState.value.activeMode.title,
+                captureMode = if (zoom >= 4.5f) "/HDREAL Deep Clear Remaster" else _uiState.value.activeMode.title,
                 stabilityScore = currentTele.stabilityScore,
                 hasDehaze = isDehaze,
                 isMoonMode = isMoon,
-                title = if (isMoon) "10X Moon Astro Shot" else "10X UltraZoom Fusion"
+                title = titleName
             )
 
             val insertedId = photoDao.insertPhoto(entity)
@@ -221,8 +240,35 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
             _uiState.value = _uiState.value.copy(
                 isProcessingFusion = false,
-                lastCapturedPhoto = savedEntity
+                lastCapturedPhoto = savedEntity,
+                lastEnhancedBitmap = enhancedBmp,
+                lastRawBitmap = rawBmp,
+                showHdRealPreviewModal = (zoom >= 4.5f) // Auto show /HDREAL Before/After sheet for 5X and 10X!
             )
+        }
+    }
+
+    fun applyUltraMaxRemaster(photo: CapturedPhotoEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val context = getApplication<Application>()
+            val sourceFile = photo.rawImagePath?.let { File(it) } ?: File(photo.enhancedImagePath)
+            if (!sourceFile.exists()) return@launch
+
+            val srcBmp = BitmapFactory.decodeFile(sourceFile.absolutePath) ?: return@launch
+            val ultraRemastered = FusionProcessingEngine.applyHDRealClarity(
+                source = srcBmp,
+                zoomFactor = photo.zoomLevel,
+                isMoonMode = photo.isMoonMode,
+                isDehaze = photo.hasDehaze,
+                intensity = 2.2f // 220% Max 8K clarity
+            )
+
+            val newPath = FusionProcessingEngine.saveBitmapToFile(context, ultraRemastered, "hdreal_max_clear")
+            val updated = photo.copy(
+                enhancedImagePath = newPath,
+                title = "/HDREAL 8K Max Clear (${photo.zoomLevel.toInt()}X)"
+            )
+            photoDao.insertPhoto(updated)
         }
     }
 

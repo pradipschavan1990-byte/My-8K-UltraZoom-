@@ -160,7 +160,7 @@ fun PhotoRestoreScreen(
                     letterSpacing = 0.5.sp
                 )
                 Text(
-                    text = "10X Super-Resolution & De-Haze Recovery",
+                    text = "/HDREAL 3.0 • ChatGPT Style Blur to Clear HD Remaster",
                     color = Color.White.copy(alpha = 0.6f),
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace
@@ -455,9 +455,9 @@ fun PhotoRestoreScreen(
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = "RUN 10X AI RESTORATION",
+                text = "RUN /HDREAL 3.0 AI DEEP RESTORATION",
                 color = ObsidianBlack,
-                fontSize = 14.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace
             )

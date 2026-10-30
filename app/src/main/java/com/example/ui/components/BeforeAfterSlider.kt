@@ -120,7 +120,7 @@ fun BeforeAfterSlider(
                 .padding(horizontal = 8.dp, vertical = 4.dp)
         ) {
             Text(
-                text = "BEFORE (RAW)",
+                text = "BEFORE (BLUR TELEPHOTO)",
                 color = Color.White.copy(alpha = 0.8f),
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
@@ -137,7 +137,7 @@ fun BeforeAfterSlider(
                 .padding(horizontal = 8.dp, vertical = 4.dp)
         ) {
             Text(
-                text = "AFTER (HDREAL 2.0)",
+                text = "AFTER (/HDREAL 3.0)",
                 color = CyberGold,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,

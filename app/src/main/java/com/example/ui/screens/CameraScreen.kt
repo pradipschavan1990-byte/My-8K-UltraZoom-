@@ -79,6 +79,7 @@ import androidx.core.content.ContextCompat
 import com.example.R
 import com.example.ui.components.DistanceMeterOverlay
 import com.example.ui.components.DualZoomPipWindow
+import com.example.ui.components.HdRealResultSheet
 import com.example.ui.components.SniperStabilizerRing
 import com.example.ui.components.ZoomDialSlider
 import com.example.ui.theme.CyberGold
@@ -558,6 +559,20 @@ fun CameraScreen(
         // 6. Computational 100-Frame Fusion Processing Dialog
         if (uiState.isProcessingFusion) {
             FusionProcessingDialog(progress = uiState.fusionProgress)
+        }
+
+        // 7. /HDREAL 3.0 Instant Before/After Remaster Result Sheet
+        if (uiState.showHdRealPreviewModal && uiState.lastRawBitmap != null && uiState.lastEnhancedBitmap != null) {
+            HdRealResultSheet(
+                rawBitmap = uiState.lastRawBitmap!!,
+                enhancedBitmap = uiState.lastEnhancedBitmap!!,
+                zoomLevel = uiState.currentZoom,
+                onDismiss = { viewModel.closeHdRealPreview() },
+                onOpenGallery = {
+                    viewModel.closeHdRealPreview()
+                    onNavigateToGallery()
+                }
+            )
         }
     }
 }

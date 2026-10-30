@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Lock
@@ -241,6 +242,35 @@ fun GalleryScreen(
                         text = "MODE: ${photo.captureMode} • ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(photo.timestamp))}",
                         color = Color.White.copy(alpha = 0.5f),
                         fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+
+                // Boost with /HDREAL Ultra Max Button
+                Button(
+                    onClick = {
+                        viewModel.applyUltraMaxRemaster(photo)
+                        selectedPhoto = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = CyberGold),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp)
+                        .testTag("apply_hdreal_max_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoFixHigh,
+                        contentDescription = "Apply /HDREAL",
+                        tint = ObsidianBlack,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "⚡ /HDREAL 8K MAX CLARITY (BOOST 220%)",
+                        color = ObsidianBlack,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace
                     )
                 }

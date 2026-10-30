@@ -84,9 +84,9 @@ fun FusionProcessingDialog(
                             .background(NeonGreen.copy(alpha = pulseAlpha))
                     )
                     Text(
-                        text = "100-FRAME AI FUSION",
+                        text = "100-FRAME /HDREAL 3.0",
                         color = NeonCyan,
-                        fontSize = 16.sp,
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace,
                         letterSpacing = 1.sp
@@ -150,9 +150,9 @@ fun FusionProcessingDialog(
 
                 // Subtext Specs
                 Text(
-                    text = "HDREAL 2.0 • AI TRIPOD JITTER ZERO • RAW MERGE",
-                    color = Color.White.copy(alpha = 0.5f),
-                    fontSize = 9.sp,
+                    text = "/HDREAL 3.0 CHATGPT-STYLE CLARITY • AI TRIPOD JITTER ZERO • RAW MERGE",
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 8.5.sp,
                     fontFamily = FontFamily.Monospace
                 )
             }

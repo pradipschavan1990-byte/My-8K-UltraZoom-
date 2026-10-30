@@ -108,5 +108,27 @@ fun DistanceMeterOverlay(
                 )
             }
         }
+
+        // /HDREAL 3.0 Telephoto Clarity Status
+        if (zoomLevel >= 4.5f) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(CyberGold)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "/HDREAL 3.0: 5X/10X CLEAR HD ACTIVE",
+                    color = CyberGold,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+        }
     }
 }
