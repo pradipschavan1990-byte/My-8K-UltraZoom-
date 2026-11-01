@@ -9,22 +9,23 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.exp
-import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 data class TelemetryData(
     val stabilityScore: Int = 85, // 0 to 100
     val isTripodLocked: Boolean = false,
-    val isSniperSteady: Boolean = false, // >= 85%
+    val isSniperSteady: Boolean = false, // >= 82%
     val driftOffsetX: Float = 0f,
     val driftOffsetY: Float = 0f,
     val estimatedDistanceMeters: Float = 12.5f,
     val distanceDisplay: String = "12.5 m",
     val laserConfidence: Int = 94,
-    val pitchAngle: Float = 0f
+    val pitchAngle: Float = 0f,
+    val rollAngleDegrees: Float = 0f,
+    val isLevelStraight: Boolean = true
 )
 
 class SensorTelemetryManager(context: Context) : SensorEventListener {
@@ -40,6 +41,7 @@ class SensorTelemetryManager(context: Context) : SensorEventListener {
     private var lastAccY = 0f
     private var lastAccZ = 9.8f
     private var smoothJitter = 0.1f
+    private var smoothRoll = 0f
 
     private var currentZoom: Float = 1.0f
 
@@ -79,6 +81,10 @@ class SensorTelemetryManager(context: Context) : SensorEventListener {
                 lastAccY = ay
                 lastAccZ = az
 
+                // Calculate roll angle in degrees (-45° to +45°)
+                val rawRoll = Math.toDegrees(atan2(-ax.toDouble(), ay.coerceAtLeast(0.1f).toDouble())).toFloat()
+                smoothRoll = 0.82f * smoothRoll + 0.18f * rawRoll
+
                 // low pass filter for jitter
                 smoothJitter = 0.8f * smoothJitter + 0.2f * rawJitter
 
@@ -112,7 +118,6 @@ class SensorTelemetryManager(context: Context) : SensorEventListener {
         val driftY = (((lastAccY - 4f) * 1.5f) * (1f - (stability / 100f))).coerceIn(-25f, 25f)
 
         // Estimated Distance calculation based on zoom magnification and perspective
-        // At 1X: near 2m-10m; At 10X: 25m-150m; At 30X: 100m-800m
         val baseDist = when {
             currentZoom <= 1.0f -> 3.2f
             currentZoom <= 2.0f -> 7.8f
@@ -128,6 +133,8 @@ class SensorTelemetryManager(context: Context) : SensorEventListener {
         }
 
         val laserConf = (90 + (stability % 10)).coerceIn(88, 99)
+        val rollDeg = ((smoothRoll * 10f).roundToInt() / 10f).coerceIn(-45f, 45f)
+        val isLevel = abs(rollDeg) <= 1.2f
 
         _telemetry.value = TelemetryData(
             stabilityScore = stability,
@@ -138,7 +145,9 @@ class SensorTelemetryManager(context: Context) : SensorEventListener {
             estimatedDistanceMeters = baseDist,
             distanceDisplay = distanceDisplay,
             laserConfidence = laserConf,
-            pitchAngle = lastAccY
+            pitchAngle = lastAccY,
+            rollAngleDegrees = rollDeg,
+            isLevelStraight = isLevel
         )
     }
 

@@ -63,4 +63,44 @@ class ExampleUnitTest {
         val macroDistanceCm = 4.0f
         assertEquals(4.0f, macroDistanceCm, 0.01f)
     }
+
+    @Test
+    fun testPinchToZoomCalculation() {
+        val initialZoom = 1.0f
+        val pinchSpreadScale = 1.5f
+        val calculatedZoom = (initialZoom * pinchSpreadScale).coerceIn(0.6f, 30.0f)
+        assertEquals(1.5f, calculatedZoom, 0.01f)
+
+        // Test zoom pinch out clamp min
+        val smallScale = 0.2f
+        val clampedMin = (initialZoom * smallScale).coerceIn(0.6f, 30.0f)
+        assertEquals(0.6f, clampedMin, 0.01f)
+
+        // Test zoom pinch in clamp max
+        val largeScale = 40.0f
+        val clampedMax = (initialZoom * largeScale).coerceIn(0.6f, 30.0f)
+        assertEquals(30.0f, clampedMax, 0.01f)
+    }
+
+    @Test
+    fun testExposureCompensationCalculation() {
+        val initialEv = 0.0f
+        assertEquals(0.0f, initialEv, 0.001f)
+
+        // Test positive EV clamp (+3.0)
+        val highEv = 5.2f
+        val clampedHigh = highEv.coerceIn(-3.0f, 3.0f)
+        assertEquals(3.0f, clampedHigh, 0.01f)
+
+        // Test negative EV clamp (-3.0)
+        val lowEv = -4.5f
+        val clampedLow = lowEv.coerceIn(-3.0f, 3.0f)
+        assertEquals(-3.0f, clampedLow, 0.01f)
+
+        // Test CameraX EV step index calculation
+        val step = 1.0f / 6.0f // 1/6 EV step typical on modern sensors
+        val targetEv = 1.5f
+        val index = kotlin.math.round((targetEv / step)).toInt()
+        assertEquals(9, index)
+    }
 }

@@ -89,9 +89,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.camera.core.FocusMeteringAction
+import androidx.compose.material.icons.filled.Bolt
 import kotlinx.coroutines.delay
 import com.example.ui.components.CameraSettingsDialog
+import com.example.ui.components.CompositionGridOverlay
+import com.example.ui.components.ExposureSlider
 import com.example.ui.components.TelemetryModalDialog
+import com.example.ui.components.ViewfinderGestureOverlay
 import com.example.R
 import com.example.engine.CapCutFilter
 import com.example.ui.components.CapCutFilterBar
@@ -151,6 +155,7 @@ fun CameraScreen(
     }
 
     var boundCameraControl by remember { mutableStateOf<androidx.camera.core.CameraControl?>(null) }
+    var boundCameraInfo by remember { mutableStateOf<androidx.camera.core.CameraInfo?>(null) }
     var activePreviewView by remember { mutableStateOf<PreviewView?>(null) }
     var maxZoomRatio by remember { mutableStateOf(10f) }
     var minZoomRatio by remember { mutableStateOf(0.6f) }
@@ -164,11 +169,13 @@ fun CameraScreen(
     var focusPoint by remember { mutableStateOf<Offset?>(null) }
     var isFocusing by remember { mutableStateOf(false) }
 
-    LaunchedEffect(focusPoint) {
+    LaunchedEffect(focusPoint, uiState.isExposureSliderVisible) {
         if (focusPoint != null) {
             isFocusing = true
-            delay(2400)
-            isFocusing = false
+            if (!uiState.isExposureSliderVisible) {
+                delay(2400)
+                isFocusing = false
+            }
         }
     }
 
@@ -200,6 +207,12 @@ fun CameraScreen(
             onToggleSilentSpyMode = { viewModel.toggleSilentSpyMode() },
             isPipVisible = uiState.isPipOverviewVisible,
             onTogglePip = { viewModel.togglePipOverview() },
+            isGridEnabled = uiState.isGridEnabled,
+            onToggleGrid = { viewModel.toggleGrid() },
+            isHorizonLevelerEnabled = uiState.isHorizonLevelerEnabled,
+            onToggleHorizonLeveler = { viewModel.toggleHorizonLeveler() },
+            isHapticZoomEnabled = uiState.isHapticZoomEnabled,
+            onToggleHapticZoom = { viewModel.toggleHapticZoom() },
             onOpenPhotoRestore = onNavigateToRestore,
             onDismiss = { showSettingsModal = false }
         )
@@ -225,24 +238,7 @@ fun CameraScreen(
         // 1. Live Camera Viewfinder or Simulation Engine
         if (hasCameraPermission) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTapGestures { tapOffset ->
-                            focusPoint = tapOffset
-                            try {
-                                val factory = activePreviewView?.meteringPointFactory
-                                val point = factory?.createPoint(tapOffset.x, tapOffset.y)
-                                if (point != null) {
-                                    val action = FocusMeteringAction.Builder(point).build()
-                                    boundCameraControl?.startFocusAndMetering(action)
-                                }
-                                viewModel.hapticSoundManager.onZoomStepChanged()
-                            } catch (e: Exception) {
-                                e.printStackTrace()
-                            }
-                        }
-                    }
+                modifier = Modifier.fillMaxSize()
             ) {
                 AndroidView(
                     factory = { ctx ->
@@ -262,6 +258,7 @@ fun CameraScreen(
                                 cameraProvider.unbindAll()
                                 val camera = cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview)
                                 boundCameraControl = camera.cameraControl
+                                boundCameraInfo = camera.cameraInfo
 
                                 val zState = camera.cameraInfo.zoomState.value
                                 val maxZ = zState?.maxZoomRatio ?: 10f
@@ -279,6 +276,15 @@ fun CameraScreen(
                         activePreviewView = pView
                         try {
                             boundCameraControl?.setZoomRatio(uiState.currentZoom.coerceIn(minZoomRatio, maxZoomRatio))
+                            val expState = boundCameraInfo?.exposureState
+                            if (expState?.isExposureCompensationSupported == true) {
+                                val step = expState.exposureCompensationStep.toFloat()
+                                if (step > 0f) {
+                                    val targetIndex = (uiState.exposureEv / step).roundToInt()
+                                        .coerceIn(expState.exposureCompensationRange.lower, expState.exposureCompensationRange.upper)
+                                    boundCameraControl?.setExposureCompensationIndex(targetIndex)
+                                }
+                            }
                         } catch (e: Exception) {
                             e.printStackTrace()
                         }
@@ -287,6 +293,20 @@ fun CameraScreen(
                         .fillMaxSize()
                         .testTag("camera_preview_view")
                 )
+
+                // Real-time manual exposure brightness overlay for hardware camera preview
+                if (uiState.exposureEv != 0f) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                if (uiState.exposureEv > 0f)
+                                    Color.White.copy(alpha = (uiState.exposureEv / 3f * 0.20f).coerceIn(0f, 0.35f))
+                                else
+                                    Color.Black.copy(alpha = ((-uiState.exposureEv) / 3f * 0.45f).coerceIn(0f, 0.60f))
+                            )
+                    )
+                }
 
                 // Live CapCut Filter tint overlay on real camera preview
                 if (uiState.selectedCapCutFilter != CapCutFilter.ORIGINAL) {
@@ -324,19 +344,29 @@ fun CameraScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTapGestures { tapOffset ->
-                            focusPoint = tapOffset
-                            viewModel.hapticSoundManager.onZoomStepChanged()
-                        }
-                    }
                     .offset { IntOffset(driftX.roundToInt(), driftY.roundToInt()) },
                 contentAlignment = Alignment.Center
             ) {
-                // Live CapCut Filter applied directly to simulation viewfinder!
-                val colorFilter = if (uiState.selectedCapCutFilter != CapCutFilter.ORIGINAL) {
-                    ColorFilter.colorMatrix(ColorMatrix(uiState.selectedCapCutFilter.colorMatrixValues))
-                } else null
+                // Live CapCut Filter + Exposure Brightness applied directly to simulation viewfinder!
+                val colorFilter = run {
+                    val baseMatrix = if (uiState.selectedCapCutFilter != CapCutFilter.ORIGINAL) {
+                        uiState.selectedCapCutFilter.colorMatrixValues.clone()
+                    } else {
+                        floatArrayOf(
+                            1f, 0f, 0f, 0f, 0f,
+                            0f, 1f, 0f, 0f, 0f,
+                            0f, 0f, 1f, 0f, 0f,
+                            0f, 0f, 0f, 1f, 0f
+                        )
+                    }
+                    if (uiState.exposureEv != 0f) {
+                        val brightnessOffset = uiState.exposureEv * 26f
+                        baseMatrix[4] += brightnessOffset
+                        baseMatrix[9] += brightnessOffset
+                        baseMatrix[14] += brightnessOffset
+                    }
+                    ColorFilter.colorMatrix(ColorMatrix(baseMatrix))
+                }
 
                 Image(
                     painter = painterResource(id = sampleResId),
@@ -350,6 +380,56 @@ fun CameraScreen(
                 )
             }
         }
+
+        // Composition Grid (Rule-of-Thirds) & Virtual Horizon Spirit Level
+        CompositionGridOverlay(
+            isGridEnabled = uiState.isGridEnabled,
+            isLevelerEnabled = uiState.isHorizonLevelerEnabled,
+            rollAngleDegrees = telemetry.rollAngleDegrees,
+            isLevelStraight = telemetry.isLevelStraight
+        )
+
+        // Viewfinder Gesture Overlay (Intuitive Pinch-to-Zoom & Tap-to-Focus & Long-Press Exposure)
+        ViewfinderGestureOverlay(
+            currentZoom = uiState.currentZoom,
+            onZoomChanged = { newZoom ->
+                viewModel.setZoom(newZoom)
+            },
+            onStepHaptic = {
+                viewModel.hapticSoundManager.onZoomStepChanged()
+            },
+            onTapToFocus = { tapOffset ->
+                focusPoint = tapOffset
+                if (hasCameraPermission) {
+                    try {
+                        val factory = activePreviewView?.meteringPointFactory
+                        val point = factory?.createPoint(tapOffset.x, tapOffset.y)
+                        if (point != null) {
+                            val action = FocusMeteringAction.Builder(point).build()
+                            boundCameraControl?.startFocusAndMetering(action)
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+                viewModel.hapticSoundManager.onZoomStepChanged()
+            },
+            onLongPress = { longPressOffset ->
+                focusPoint = longPressOffset
+                viewModel.showExposureSlider(longPressOffset)
+            }
+        )
+
+        // Manual Exposure Compensation Slider (Activated by long-press on viewfinder)
+        ExposureSlider(
+            isVisible = uiState.isExposureSliderVisible,
+            exposureEv = uiState.exposureEv,
+            anchorPosition = uiState.exposureSliderPosition,
+            onExposureChanged = { viewModel.setExposureEv(it) },
+            onReset = { viewModel.resetExposure() },
+            onDismiss = { viewModel.hideExposureSlider() },
+            onStepHaptic = { viewModel.hapticSoundManager.onZoomStepChanged() }
+        )
 
         // Visual Tap-to-Focus Reticle & AI Tripod Lock Instant Feedback
         if (isFocusing && focusPoint != null) {
@@ -376,7 +456,13 @@ fun CameraScreen(
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
                     Text(
-                        text = if (uiState.isTripodLockEnabled) "AI TRIPOD LOCKED" else "AF / AE LOCK",
+                        text = if (uiState.isExposureSliderVisible || uiState.exposureEv != 0f) {
+                            "AE LOCK (${if (uiState.exposureEv > 0f) "+" else ""}${String.format(java.util.Locale.US, "%.1f", uiState.exposureEv)} EV)"
+                        } else if (uiState.isTripodLockEnabled) {
+                            "AI TRIPOD LOCKED"
+                        } else {
+                            "AF / AE LOCK"
+                        },
                         color = CyberGold,
                         fontSize = 8.sp,
                         fontWeight = FontWeight.Bold,
@@ -431,7 +517,7 @@ fun CameraScreen(
             }
         }
 
-        // 3. Ultra-Clean Top HUD (Minimalist, Transparent Gradient with statusBarsPadding)
+        // 3. Ultra-Clean Top HUD (Minimalist, Transparent with statusBarsPadding)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -439,7 +525,7 @@ fun CameraScreen(
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            ObsidianBlack.copy(alpha = 0.90f),
+                            Color.Black.copy(alpha = 0.35f),
                             Color.Transparent
                         )
                     )
@@ -477,12 +563,12 @@ fun CameraScreen(
                 )
             }
 
-            // Center: Minimalist Clickable Telemetry Pop-up Chip
+            // Center: Minimalist Transparent Clickable Telemetry Pop-up Chip
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(16.dp))
-                    .background(DarkGlassSurface.copy(alpha = 0.92f))
-                    .border(1.dp, NeonCyan.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
+                    .background(Color.Black.copy(alpha = 0.35f))
+                    .border(1.dp, NeonCyan.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
                     .clickable { showTelemetryModal = true }
                     .padding(horizontal = 10.dp, vertical = 5.dp)
                     .testTag("open_telemetry_chip")
@@ -512,19 +598,19 @@ fun CameraScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Filter Wand Pop-up Trigger
+                // Filter Wand Pop-up Trigger (Star icon to open/close filters)
                 Box(
                     modifier = Modifier
                         .size(38.dp)
                         .clip(CircleShape)
                         .background(
                             if (uiState.selectedCapCutFilter != CapCutFilter.ORIGINAL || showFilterDrawer)
-                                CyberGold.copy(alpha = 0.35f)
-                            else DarkGlassCard
+                                CyberGold.copy(alpha = 0.40f)
+                            else Color.Black.copy(alpha = 0.35f)
                         )
                         .border(
                             1.dp,
-                            if (uiState.selectedCapCutFilter != CapCutFilter.ORIGINAL) CyberGold else DarkGlassBorder,
+                            if (uiState.selectedCapCutFilter != CapCutFilter.ORIGINAL) CyberGold else Color.White.copy(alpha = 0.35f),
                             CircleShape
                         )
                         .clickable { showFilterDrawer = !showFilterDrawer }
@@ -544,8 +630,8 @@ fun CameraScreen(
                     modifier = Modifier
                         .size(38.dp)
                         .clip(CircleShape)
-                        .background(DarkGlassCard)
-                        .border(1.dp, DarkGlassBorder, CircleShape)
+                        .background(Color.Black.copy(alpha = 0.35f))
+                        .border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape)
                         .clickable { showSettingsModal = true }
                         .testTag("top_settings_button"),
                     contentAlignment = Alignment.Center
@@ -638,12 +724,20 @@ fun CameraScreen(
             }
         }
 
-        // 6. Clean Bottom Control Deck
+        // 6. Clean Bottom Control Deck (Transparent gradient so camera is visible)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
-                .background(ObsidianBlack.copy(alpha = 0.94f))
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            Color.Black.copy(alpha = 0.35f),
+                            Color.Black.copy(alpha = 0.50f)
+                        )
+                    )
+                )
                 .padding(bottom = 16.dp, top = 6.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -742,8 +836,8 @@ fun CameraScreen(
                     modifier = Modifier
                         .size(54.dp)
                         .clip(RoundedCornerShape(14.dp))
-                        .background(DarkGlassCard)
-                        .border(1.dp, NeonCyan.copy(alpha = 0.7f), RoundedCornerShape(14.dp))
+                        .background(Color.Black.copy(alpha = 0.35f))
+                        .border(1.dp, NeonCyan.copy(alpha = 0.6f), RoundedCornerShape(14.dp))
                         .clickable { onNavigateToGallery() }
                         .testTag("camera_gallery_button"),
                     contentAlignment = Alignment.Center
@@ -825,6 +919,61 @@ fun CameraScreen(
                             }
                         }
                     }
+                } else if (uiState.activeMode == CameraMode.BURST_MODE) {
+                    // High-Speed Burst Mode Shutter Button (NeonCyan / Bolt)
+                    Box(
+                        modifier = Modifier
+                            .size(80.dp)
+                            .clip(CircleShape)
+                            .border(
+                                3.5.dp,
+                                if (uiState.isBurstCapturing) NeonGreen else NeonCyan,
+                                CircleShape
+                            )
+                            .clickable(enabled = !uiState.isBurstCapturing) {
+                                val liveBmp = activePreviewView?.bitmap
+                                viewModel.triggerBurstCapture(liveBmp, maxShots = 15)
+                            }
+                            .testTag("burst_shutter_button"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(62.dp)
+                                .clip(CircleShape)
+                                .background(if (uiState.isBurstCapturing) NeonGreen.copy(alpha = 0.85f) else NeonCyan),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (uiState.isBurstCapturing) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Text(
+                                        text = "${uiState.burstCapturedCount}",
+                                        color = ObsidianBlack,
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                    Text(
+                                        text = "/15",
+                                        color = ObsidianBlack.copy(alpha = 0.8f),
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Bolt,
+                                    contentDescription = "Capture 15-Shot Burst",
+                                    tint = ObsidianBlack,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                        }
+                    }
                 } else {
                     // 100-Frame Fusion Photo Shutter Button (CyberGold)
                     Box(
@@ -868,8 +1017,8 @@ fun CameraScreen(
                         modifier = Modifier
                             .size(54.dp)
                             .clip(RoundedCornerShape(14.dp))
-                            .background(DarkGlassCard)
-                            .border(1.dp, WarningRed.copy(alpha = 0.7f), RoundedCornerShape(14.dp))
+                            .background(Color.Black.copy(alpha = 0.35f))
+                            .border(1.dp, WarningRed.copy(alpha = 0.6f), RoundedCornerShape(14.dp))
                             .clickable {
                                 viewModel.setMode(CameraMode.VIDEO_4K)
                             }
@@ -901,8 +1050,8 @@ fun CameraScreen(
                         modifier = Modifier
                             .size(54.dp)
                             .clip(RoundedCornerShape(14.dp))
-                            .background(DarkGlassCard)
-                            .border(1.dp, CyberGold.copy(alpha = 0.7f), RoundedCornerShape(14.dp))
+                            .background(Color.Black.copy(alpha = 0.35f))
+                            .border(1.dp, CyberGold.copy(alpha = 0.6f), RoundedCornerShape(14.dp))
                             .clickable {
                                 viewModel.setMode(CameraMode.FUSION_100)
                             }
@@ -949,46 +1098,6 @@ fun CameraScreen(
                 onIntensityChanged = { viewModel.setCapCutFilterIntensity(it) },
                 onClose = { showFilterDrawer = false }
             )
-        }
-
-        // Active Filter indicator chip when filter drawer is closed (Clickable to re-open drawer)
-        if (uiState.selectedCapCutFilter != CapCutFilter.ORIGINAL && !showFilterDrawer) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 172.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color.Black.copy(alpha = 0.60f))
-                    .border(1.dp, CyberGold.copy(alpha = 0.85f), RoundedCornerShape(16.dp))
-                    .clickable { showFilterDrawer = true }
-                    .padding(horizontal = 14.dp, vertical = 6.dp)
-                    .testTag("active_filter_indicator_chip")
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AutoAwesome,
-                        contentDescription = "Active Filter",
-                        tint = CyberGold,
-                        modifier = Modifier.size(13.dp)
-                    )
-                    Text(
-                        text = "${uiState.selectedCapCutFilter.displayName} (${(uiState.capCutFilterIntensity * 100).roundToInt()}%)",
-                        color = CyberGold,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
-                    Text(
-                        text = "• TAP TO CHANGE",
-                        color = Color.White.copy(alpha = 0.75f),
-                        fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-            }
         }
 
         // 8. Computational 100-Frame Fusion Processing Dialog

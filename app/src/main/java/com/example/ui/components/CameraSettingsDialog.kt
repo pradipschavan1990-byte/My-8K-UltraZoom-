@@ -13,15 +13,20 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PictureInPicture
 import androidx.compose.material.icons.filled.RawOn
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Button
@@ -61,6 +66,12 @@ fun CameraSettingsDialog(
     onToggleSilentSpyMode: () -> Unit,
     isPipVisible: Boolean,
     onTogglePip: () -> Unit,
+    isGridEnabled: Boolean = true,
+    onToggleGrid: () -> Unit = {},
+    isHorizonLevelerEnabled: Boolean = true,
+    onToggleHorizonLeveler: () -> Unit = {},
+    isHapticZoomEnabled: Boolean = true,
+    onToggleHapticZoom: () -> Unit = {},
     onOpenPhotoRestore: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -75,7 +86,9 @@ fun CameraSettingsDialog(
                 .padding(18.dp)
         ) {
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 // Header
@@ -132,44 +145,77 @@ fun CameraSettingsDialog(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // 1. Tripod Gimbal Lock
+                    // 1. AI Gyro Auto-Stabilizer (Tripod Gimbal Lock)
                     SettingsToggleItem(
                         icon = Icons.Default.Lock,
-                        title = "Tripod Gimbal Lock",
-                        subtitle = "Gyro stabilization anti-shake engine",
+                        title = "AI Auto-Stabilization (Gimbal Lock)",
+                        subtitle = "Gyro anti-shake stabilization at 5X-30X zoom",
                         isChecked = isTripodLockEnabled,
                         onCheckedChange = { onToggleTripodLock() },
-                        activeColor = NeonCyan,
+                        activeColor = NeonGreen,
                         testTag = "setting_tripod_lock"
                     )
 
-                    // 2. RAW + AI Mode
+                    // 2. 3x3 Composition Grid (Rule of Thirds)
+                    SettingsToggleItem(
+                        icon = Icons.Default.GridOn,
+                        title = "3×3 Composition Grid Overlay",
+                        subtitle = "Professional Rule-of-Thirds framing guides",
+                        isChecked = isGridEnabled,
+                        onCheckedChange = { onToggleGrid() },
+                        activeColor = CyberGold,
+                        testTag = "setting_grid_overlay"
+                    )
+
+                    // 3. Virtual Horizon Spirit Level
+                    SettingsToggleItem(
+                        icon = Icons.Default.Explore,
+                        title = "Horizon Spirit Level (0° Leveler)",
+                        subtitle = "Real-time tilt gauge for perfectly straight photos",
+                        isChecked = isHorizonLevelerEnabled,
+                        onCheckedChange = { onToggleHorizonLeveler() },
+                        activeColor = NeonCyan,
+                        testTag = "setting_horizon_leveler"
+                    )
+
+                    // 4. Haptic Zoom Feedback
+                    SettingsToggleItem(
+                        icon = Icons.Default.Vibration,
+                        title = "Haptic Zoom Ticks",
+                        subtitle = "Tactile vibration ticks at 1X, 2X, 5X, 10X milestones",
+                        isChecked = isHapticZoomEnabled,
+                        onCheckedChange = { onToggleHapticZoom() },
+                        activeColor = CyberGold,
+                        testTag = "setting_haptic_zoom"
+                    )
+
+                    // 5. RAW + AI Mode
                     SettingsToggleItem(
                         icon = Icons.Default.RawOn,
                         title = "Save RAW + AI Image",
                         subtitle = "Saves uncompressed telephoto alongside /HDREAL",
                         isChecked = isSaveRawEnabled,
                         onCheckedChange = { onToggleSaveRaw() },
-                        activeColor = NeonGreen,
+                        activeColor = NeonCyan,
                         testTag = "setting_save_raw"
                     )
 
-                    // 3. Silent Spy Mode
+                    // 6. Silent Spy Mode
                     SettingsToggleItem(
                         icon = if (isSilentSpyMode) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
                         title = "Silent Spy Shutter",
-                        subtitle = "Mute capture & zoom haptic clicks",
+                        subtitle = "Mute capture & zoom audio clicks",
                         isChecked = isSilentSpyMode,
                         onCheckedChange = { onToggleSilentSpyMode() },
                         activeColor = CyberGold,
                         testTag = "setting_silent_mode"
                     )
 
-                    // 4. Picture-in-Picture Overview
+                    // 7. Picture-in-Picture Overview
                     SettingsToggleItem(
                         icon = Icons.Default.PictureInPicture,
                         title = "Dual-Zoom PiP Window",
-                        subtitle = "Mini 1X radar window on screen",
+                        subtitle = "Mini 1X radar overview window on screen",
                         isChecked = isPipVisible,
                         onCheckedChange = { onTogglePip() },
                         activeColor = NeonCyan,
@@ -183,68 +229,25 @@ fun CameraSettingsDialog(
                         onDismiss()
                         onOpenPhotoRestore()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = DarkGlassCard),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, NeonCyan.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
-                        .testTag("settings_open_restore_button")
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.AutoFixHigh,
-                                contentDescription = "AI Photo Restore",
-                                tint = NeonCyan,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Column {
-                                Text(
-                                    text = "AI Photo Restore Tool",
-                                    color = Color.White,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                                Text(
-                                    text = "ChatGPT /HDREAL Old Photo Remaster",
-                                    color = NeonCyan.copy(alpha = 0.85f),
-                                    fontSize = 9.sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
-                        }
-                        Text(
-                            text = "OPEN →",
-                            color = CyberGold,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-                }
-
-                // Close Button
-                Button(
-                    onClick = onDismiss,
-                    colors = ButtonDefaults.buttonColors(containerColor = CyberGold),
-                    shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(44.dp)
-                        .testTag("settings_done_button")
+                        .testTag("open_photo_restore_from_settings"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = CyberGold,
+                        contentColor = ObsidianBlack
+                    )
                 ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoFixHigh,
+                        contentDescription = "AI Restore",
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "DONE",
-                        color = ObsidianBlack,
-                        fontSize = 12.sp,
+                        text = "AI OLD PHOTO RESTORE TOOL",
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace
                     )
@@ -268,38 +271,49 @@ private fun SettingsToggleItem(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(DarkGlassSurface)
-            .border(1.dp, if (isChecked) activeColor.copy(alpha = 0.6f) else DarkGlassBorder, RoundedCornerShape(12.dp))
+            .background(DarkGlassCard.copy(alpha = 0.5f))
+            .border(1.dp, if (isChecked) activeColor.copy(alpha = 0.4f) else DarkGlassBorder, RoundedCornerShape(12.dp))
             .clickable { onCheckedChange(!isChecked) }
-            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .padding(horizontal = 12.dp, vertical = 10.dp)
             .testTag(testTag),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(
-            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1f),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.weight(1f)
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = title,
-                tint = if (isChecked) activeColor else Color.White.copy(alpha = 0.5f),
-                modifier = Modifier.size(20.dp)
-            )
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (isChecked) activeColor.copy(alpha = 0.2f) else DarkGlassSurface)
+                    .border(1.dp, if (isChecked) activeColor.copy(alpha = 0.6f) else DarkGlassBorder, RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = title,
+                    tint = if (isChecked) activeColor else Color.White.copy(alpha = 0.6f),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+
             Column {
                 Text(
                     text = title,
                     color = Color.White,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold,
                     fontFamily = FontFamily.Monospace
                 )
                 Text(
                     text = subtitle,
-                    color = Color.White.copy(alpha = 0.55f),
+                    color = Color.White.copy(alpha = 0.6f),
                     fontSize = 9.sp,
-                    fontFamily = FontFamily.Monospace
+                    fontFamily = FontFamily.Monospace,
+                    lineHeight = 12.sp
                 )
             }
         }
@@ -308,11 +322,12 @@ private fun SettingsToggleItem(
             checked = isChecked,
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = ObsidianBlack,
-                checkedTrackColor = activeColor,
+                checkedThumbColor = activeColor,
+                checkedTrackColor = activeColor.copy(alpha = 0.35f),
                 uncheckedThumbColor = Color.White.copy(alpha = 0.6f),
-                uncheckedTrackColor = DarkGlassCard
-            )
+                uncheckedTrackColor = DarkGlassBorder
+            ),
+            modifier = Modifier.padding(start = 6.dp)
         )
     }
 }

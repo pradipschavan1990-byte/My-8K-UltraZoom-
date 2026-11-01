@@ -71,7 +71,7 @@ fun ZoomDialSlider(
             colors = SliderDefaults.colors(
                 thumbColor = if (zoomLevel >= 10f) CyberGold else NeonCyan,
                 activeTrackColor = if (zoomLevel >= 10f) CyberGold else NeonCyan,
-                inactiveTrackColor = DarkGlassBorder
+                inactiveTrackColor = Color.White.copy(alpha = 0.25f)
             ),
             modifier = Modifier
                 .weight(1f)
@@ -83,10 +83,10 @@ fun ZoomDialSlider(
         Box(
             modifier = Modifier
                 .clip(RoundedCornerShape(8.dp))
-                .background(DarkGlassSurface.copy(alpha = 0.88f))
+                .background(Color.Black.copy(alpha = 0.35f))
                 .border(
                     width = 1.dp,
-                    color = if (zoomLevel >= 10f) CyberGold else NeonCyan,
+                    color = (if (zoomLevel >= 10f) CyberGold else NeonCyan).copy(alpha = 0.7f),
                     shape = RoundedCornerShape(8.dp)
                 )
                 .clickable {

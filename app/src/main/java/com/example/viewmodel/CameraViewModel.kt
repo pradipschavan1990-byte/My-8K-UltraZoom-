@@ -27,10 +27,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.geometry.Offset
+import kotlin.math.roundToInt
 import java.io.File
 
 enum class CameraMode(val title: String, val badge: String, val lensDesc: String) {
     FUSION_100("10X /HDREAL", "10X FUSION", "64MP + /HDREAL 3.0 Multi-Frame"),
+    BURST_MODE("Burst Fire", "20 FPS", "High-Speed Rapid Fire Action"),
     POCO_64MP("64MP Ultra HD", "64MP FULL SENSOR", "64MP OIS (9248x6936)"),
     ULTRA_WIDE_06X("8MP Ultra-Wide", "0.6X 118° FOV", "8MP Ultra-Wide Angle"),
     MACRO_2MP("2MP Macro", "4cm CLOSE-UP", "2MP Fixed 4cm Focus"),
@@ -59,7 +62,15 @@ data class CameraUiState(
     val selectedCapCutFilter: CapCutFilter = CapCutFilter.CINEMATIC_TEAL,
     val capCutFilterIntensity: Float = 1.0f,
     val showFilterSelector: Boolean = false,
-    val lastSavedVideoMessage: String? = null
+    val lastSavedVideoMessage: String? = null,
+    val isGridEnabled: Boolean = true,
+    val isHorizonLevelerEnabled: Boolean = true,
+    val isHapticZoomEnabled: Boolean = true,
+    val isBurstCapturing: Boolean = false,
+    val burstCapturedCount: Int = 0,
+    val exposureEv: Float = 0.0f,
+    val isExposureSliderVisible: Boolean = false,
+    val exposureSliderPosition: Offset? = null
 )
 
 class CameraViewModel(application: Application) : AndroidViewModel(application) {
@@ -109,6 +120,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
         }
+
+        // Monitor horizon spirit level for 0° alignment haptic tick
+        var wasLevel = false
+        viewModelScope.launch {
+            telemetry.collect { tele ->
+                if (tele.isLevelStraight && !wasLevel && _uiState.value.isHorizonLevelerEnabled) {
+                    hapticSoundManager.onLevelAligned()
+                }
+                wasLevel = tele.isLevelStraight
+            }
+        }
     }
 
     fun setZoom(zoom: Float) {
@@ -147,6 +169,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             CameraMode.ULTRA_WIDE_06X -> 0.6f
             CameraMode.MACRO_2MP -> 1.0f
             CameraMode.POCO_64MP -> 1.0f
+            CameraMode.BURST_MODE -> 1.0f
             CameraMode.FUSION_100 -> if (_uiState.value.currentZoom < 4.5f) 10.0f else _uiState.value.currentZoom
             CameraMode.MOON_MODE -> if (_uiState.value.currentZoom < 10.0f) 15.0f else _uiState.value.currentZoom
             CameraMode.VIDEO_4K -> _uiState.value.currentZoom
@@ -219,6 +242,28 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.value = _uiState.value.copy(isPipOverviewVisible = !_uiState.value.isPipOverviewVisible)
     }
 
+    fun setExposureEv(ev: Float) {
+        val clamped = (ev.coerceIn(-3.0f, 3.0f) * 10f).roundToInt() / 10f
+        _uiState.value = _uiState.value.copy(exposureEv = clamped)
+    }
+
+    fun showExposureSlider(position: Offset) {
+        _uiState.value = _uiState.value.copy(
+            isExposureSliderVisible = true,
+            exposureSliderPosition = position
+        )
+        hapticSoundManager.onZoomStepChanged()
+    }
+
+    fun hideExposureSlider() {
+        _uiState.value = _uiState.value.copy(isExposureSliderVisible = false)
+    }
+
+    fun resetExposure() {
+        _uiState.value = _uiState.value.copy(exposureEv = 0.0f)
+        hapticSoundManager.onZoomStepChanged()
+    }
+
     fun toggleSimulationSubject() {
         // Cycle: 0 (10X Eagle) -> 1 (30X Moon) -> 2 (2MP Macro 4cm) -> 3 (8MP Ultra-Wide 118°)
         val next = (_uiState.value.simulationSubjectIndex + 1) % 4
@@ -249,6 +294,103 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun clearSavedVideoMessage() {
         _uiState.value = _uiState.value.copy(lastSavedVideoMessage = null)
+    }
+
+    fun toggleGrid() {
+        val newStatus = !_uiState.value.isGridEnabled
+        _uiState.value = _uiState.value.copy(isGridEnabled = newStatus)
+        hapticSoundManager.onZoomStepChanged()
+    }
+
+    fun toggleHorizonLeveler() {
+        val newStatus = !_uiState.value.isHorizonLevelerEnabled
+        _uiState.value = _uiState.value.copy(isHorizonLevelerEnabled = newStatus)
+        hapticSoundManager.onZoomStepChanged()
+    }
+
+    fun toggleHapticZoom() {
+        val newStatus = !_uiState.value.isHapticZoomEnabled
+        _uiState.value = _uiState.value.copy(isHapticZoomEnabled = newStatus)
+        hapticSoundManager.isHapticEnabled = newStatus
+        hapticSoundManager.onZoomStepChanged()
+    }
+
+    fun triggerBurstCapture(sourceBitmap: Bitmap? = null, maxShots: Int = 15) {
+        if (_uiState.value.isBurstCapturing || _uiState.value.isProcessingFusion) return
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                withContext(Dispatchers.Main) {
+                    _uiState.value = _uiState.value.copy(
+                        isBurstCapturing = true,
+                        burstCapturedCount = 0
+                    )
+                }
+
+                val context = getApplication<Application>()
+                val filter = _uiState.value.selectedCapCutFilter
+                val intensity = _uiState.value.capCutFilterIntensity
+                val zoom = _uiState.value.currentZoom
+
+                for (i in 1..maxShots) {
+                    val frame = withContext(Dispatchers.Main) {
+                        sourceBitmap ?: currentFrameProvider?.invoke() ?: run {
+                            val resId = when {
+                                _uiState.value.activeMode == CameraMode.MACRO_2MP || _uiState.value.simulationSubjectIndex == 2 -> R.drawable.sample_macro
+                                _uiState.value.activeMode == CameraMode.ULTRA_WIDE_06X || _uiState.value.simulationSubjectIndex == 3 || _uiState.value.currentZoom <= 0.65f -> R.drawable.sample_ultrawide
+                                _uiState.value.activeMode == CameraMode.MOON_MODE || _uiState.value.simulationSubjectIndex == 1 -> R.drawable.sample_moon
+                                else -> R.drawable.sample_eagle
+                            }
+                            BitmapFactory.decodeResource(context.resources, resId)
+                        }
+                    }
+
+                    hapticSoundManager.onBurstShotFired(i)
+
+                    val filtered = CapCutFilterEngine.applyFilter(frame, filter, intensity)
+                    val (savedPath, _) = MediaStorageHelper.saveImageToGallery(
+                        context = context,
+                        bitmap = filtered,
+                        filenamePrefix = "burst_${i}_${filter.id}",
+                        showToast = false
+                    )
+
+                    val tele = telemetry.value
+                    val photoEntity = CapturedPhotoEntity(
+                        enhancedImagePath = savedPath,
+                        rawImagePath = savedPath,
+                        zoomLevel = zoom,
+                        estimatedDistance = tele.distanceDisplay,
+                        fusionFramesCount = 1,
+                        captureMode = "Burst Shot $i/$maxShots (${filter.displayName})",
+                        stabilityScore = tele.stabilityScore,
+                        hasDehaze = false,
+                        isMoonMode = _uiState.value.activeMode == CameraMode.MOON_MODE,
+                        title = "Burst Shot #$i • ${filter.displayName}",
+                        filterName = filter.displayName,
+                        mediaType = "BURST"
+                    )
+                    photoDao.insertPhoto(photoEntity)
+
+                    withContext(Dispatchers.Main) {
+                        _uiState.value = _uiState.value.copy(burstCapturedCount = i)
+                    }
+                    delay(120)
+                }
+
+                withContext(Dispatchers.Main) {
+                    _uiState.value = _uiState.value.copy(
+                        isBurstCapturing = false,
+                        lastSavedVideoMessage = "$maxShots फोटो बर्स्ट मोडमध्ये गॅलरीत सेव्ह झाले!"
+                    )
+                }
+            } catch (e: Throwable) {
+                android.util.Log.e("CameraVM", "Burst capture error", e)
+                withContext(Dispatchers.Main) {
+                    _uiState.value = _uiState.value.copy(isBurstCapturing = false)
+                }
+            }
+        }
     }
 
     /**

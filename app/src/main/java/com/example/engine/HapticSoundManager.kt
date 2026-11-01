@@ -23,8 +23,10 @@ class HapticSoundManager(private val context: Context) {
     }
 
     var isSilentSpyMode: Boolean = false
+    var isHapticEnabled: Boolean = true
 
     fun onZoomStepChanged() {
+        if (!isHapticEnabled) return
         // Light haptic tick
         vibrator?.let {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -37,6 +39,7 @@ class HapticSoundManager(private val context: Context) {
     }
 
     fun onZoomKeyMilestoneReached() {
+        if (!isHapticEnabled) return
         // Stronger click on key zoom milestone like 10X, 30X
         vibrator?.let {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -48,13 +51,44 @@ class HapticSoundManager(private val context: Context) {
         }
     }
 
-    fun onSniperLocked() {
+    fun onLevelAligned() {
+        if (!isHapticEnabled) return
+        // Double micro-tick when horizon level is perfectly 0 degrees
         vibrator?.let {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                it.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 20, 40, 20), -1))
+                it.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 15, 30, 15), -1))
             } else {
                 @Suppress("DEPRECATION")
-                it.vibrate(30)
+                it.vibrate(20)
+            }
+        }
+    }
+
+    fun onBurstShotFired(shotNumber: Int) {
+        if (isHapticEnabled) {
+            vibrator?.let {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    it.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK))
+                } else {
+                    @Suppress("DEPRECATION")
+                    it.vibrate(25)
+                }
+            }
+        }
+        if (!isSilentSpyMode && shotNumber % 3 == 0) {
+            mediaActionSound.play(MediaActionSound.SHUTTER_CLICK)
+        }
+    }
+
+    fun onSniperLocked() {
+        if (isHapticEnabled) {
+            vibrator?.let {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    it.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 20, 40, 20), -1))
+                } else {
+                    @Suppress("DEPRECATION")
+                    it.vibrate(30)
+                }
             }
         }
         if (!isSilentSpyMode) {
@@ -63,12 +97,14 @@ class HapticSoundManager(private val context: Context) {
     }
 
     fun playShutterEffect() {
-        vibrator?.let {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                it.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK))
-            } else {
-                @Suppress("DEPRECATION")
-                it.vibrate(45)
+        if (isHapticEnabled) {
+            vibrator?.let {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    it.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK))
+                } else {
+                    @Suppress("DEPRECATION")
+                    it.vibrate(45)
+                }
             }
         }
         if (!isSilentSpyMode) {
