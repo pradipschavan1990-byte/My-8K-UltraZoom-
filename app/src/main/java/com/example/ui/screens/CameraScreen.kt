@@ -83,7 +83,13 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.camera.core.FocusMeteringAction
+import kotlinx.coroutines.delay
 import com.example.ui.components.CameraSettingsDialog
 import com.example.ui.components.TelemetryModalDialog
 import com.example.R
@@ -154,6 +160,18 @@ fun CameraScreen(
     var showTelemetryModal by remember { mutableStateOf(false) }
     var showSettingsModal by remember { mutableStateOf(false) }
 
+    // Visual Tap-to-Focus Reticle & AI Tripod Lock Target
+    var focusPoint by remember { mutableStateOf<Offset?>(null) }
+    var isFocusing by remember { mutableStateOf(false) }
+
+    LaunchedEffect(focusPoint) {
+        if (focusPoint != null) {
+            isFocusing = true
+            delay(2400)
+            isFocusing = false
+        }
+    }
+
     DisposableEffect(activePreviewView) {
         viewModel.currentFrameProvider = { activePreviewView?.bitmap }
         onDispose {
@@ -206,7 +224,26 @@ fun CameraScreen(
     ) {
         // 1. Live Camera Viewfinder or Simulation Engine
         if (hasCameraPermission) {
-            Box(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTapGestures { tapOffset ->
+                            focusPoint = tapOffset
+                            try {
+                                val factory = activePreviewView?.meteringPointFactory
+                                val point = factory?.createPoint(tapOffset.x, tapOffset.y)
+                                if (point != null) {
+                                    val action = FocusMeteringAction.Builder(point).build()
+                                    boundCameraControl?.startFocusAndMetering(action)
+                                }
+                                viewModel.hapticSoundManager.onZoomStepChanged()
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                        }
+                    }
+            ) {
                 AndroidView(
                     factory = { ctx ->
                         val previewView = PreviewView(ctx).apply {
@@ -287,6 +324,12 @@ fun CameraScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTapGestures { tapOffset ->
+                            focusPoint = tapOffset
+                            viewModel.hapticSoundManager.onZoomStepChanged()
+                        }
+                    }
                     .offset { IntOffset(driftX.roundToInt(), driftY.roundToInt()) },
                 contentAlignment = Alignment.Center
             ) {
@@ -305,6 +348,41 @@ fun CameraScreen(
                         .scale(zoomScale)
                         .testTag("telephoto_simulation_image")
                 )
+            }
+        }
+
+        // Visual Tap-to-Focus Reticle & AI Tripod Lock Instant Feedback
+        if (isFocusing && focusPoint != null) {
+            val point = focusPoint!!
+            Box(
+                modifier = Modifier
+                    .offset { IntOffset(point.x.roundToInt() - 40.dp.roundToPx(), point.y.roundToInt() - 40.dp.roundToPx()) }
+                    .size(80.dp)
+                    .border(1.5.dp, CyberGold, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .background(CyberGold, CircleShape)
+                )
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .offset(y = 20.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(ObsidianBlack.copy(alpha = 0.85f))
+                        .border(0.5.dp, CyberGold.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = if (uiState.isTripodLockEnabled) "AI TRIPOD LOCKED" else "AF / AE LOCK",
+                        color = CyberGold,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
             }
         }
 
@@ -353,7 +431,7 @@ fun CameraScreen(
             }
         }
 
-        // 3. Ultra-Clean Top HUD (Minimalist, Transparent Gradient)
+        // 3. Ultra-Clean Top HUD (Minimalist, Transparent Gradient with statusBarsPadding)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -366,6 +444,7 @@ fun CameraScreen(
                         )
                     )
                 )
+                .statusBarsPadding()
                 .padding(horizontal = 14.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
@@ -553,65 +632,6 @@ fun CameraScreen(
                         color = ObsidianBlack,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-            }
-        }
-
-        // 5. CapCut Filter Pop-up Drawer (Slides up smoothly when ✨ is tapped)
-        AnimatedVisibility(
-            visible = showFilterDrawer,
-            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 205.dp)
-                .fillMaxWidth()
-        ) {
-            CapCutFilterBar(
-                selectedFilter = uiState.selectedCapCutFilter,
-                intensity = uiState.capCutFilterIntensity,
-                onFilterSelected = { viewModel.setCapCutFilter(it) },
-                onIntensityChanged = { viewModel.setCapCutFilterIntensity(it) },
-                onClose = { showFilterDrawer = false }
-            )
-        }
-
-        // Active Filter indicator chip when filter drawer is closed
-        if (uiState.selectedCapCutFilter != CapCutFilter.ORIGINAL && !showFilterDrawer) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 210.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(DarkGlassSurface.copy(alpha = 0.92f))
-                    .border(1.dp, CyberGold.copy(alpha = 0.75f), RoundedCornerShape(16.dp))
-                    .clickable { showFilterDrawer = true }
-                    .padding(horizontal = 12.dp, vertical = 5.dp)
-                    .testTag("active_filter_indicator_chip")
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AutoAwesome,
-                        contentDescription = "Active Filter",
-                        tint = CyberGold,
-                        modifier = Modifier.size(12.dp)
-                    )
-                    Text(
-                        text = "${uiState.selectedCapCutFilter.displayName} (${(uiState.capCutFilterIntensity * 100).roundToInt()}%)",
-                        color = CyberGold,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
-                    Text(
-                        text = "• TAP TO CHANGE",
-                        color = Color.White.copy(alpha = 0.6f),
-                        fontSize = 8.5.sp,
                         fontFamily = FontFamily.Monospace
                     )
                 }
@@ -912,7 +932,66 @@ fun CameraScreen(
             }
         }
 
-        // 6. Computational 100-Frame Fusion Processing Dialog
+        // 7. CapCut Filter Pop-up Drawer (Translucent glass, floats on top above the slim zoom slider)
+        AnimatedVisibility(
+            visible = showFilterDrawer,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 168.dp)
+                .fillMaxWidth()
+        ) {
+            CapCutFilterBar(
+                selectedFilter = uiState.selectedCapCutFilter,
+                intensity = uiState.capCutFilterIntensity,
+                onFilterSelected = { viewModel.setCapCutFilter(it) },
+                onIntensityChanged = { viewModel.setCapCutFilterIntensity(it) },
+                onClose = { showFilterDrawer = false }
+            )
+        }
+
+        // Active Filter indicator chip when filter drawer is closed (Clickable to re-open drawer)
+        if (uiState.selectedCapCutFilter != CapCutFilter.ORIGINAL && !showFilterDrawer) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 172.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.Black.copy(alpha = 0.60f))
+                    .border(1.dp, CyberGold.copy(alpha = 0.85f), RoundedCornerShape(16.dp))
+                    .clickable { showFilterDrawer = true }
+                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                    .testTag("active_filter_indicator_chip")
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = "Active Filter",
+                        tint = CyberGold,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Text(
+                        text = "${uiState.selectedCapCutFilter.displayName} (${(uiState.capCutFilterIntensity * 100).roundToInt()}%)",
+                        color = CyberGold,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Text(
+                        text = "• TAP TO CHANGE",
+                        color = Color.White.copy(alpha = 0.75f),
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+        }
+
+        // 8. Computational 100-Frame Fusion Processing Dialog
         if (uiState.isProcessingFusion) {
             FusionProcessingDialog(progress = uiState.fusionProgress)
         }

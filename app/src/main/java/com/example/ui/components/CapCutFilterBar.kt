@@ -67,10 +67,12 @@ fun CapCutFilterBar(
         modifier = modifier
             .testTag("capcut_filter_bar")
             .fillMaxWidth()
-            .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
-            .background(ObsidianBlack.copy(alpha = 0.95f))
-            .padding(vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+            .padding(horizontal = 10.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color.Black.copy(alpha = 0.50f))
+            .border(1.dp, CyberGold.copy(alpha = 0.7f), RoundedCornerShape(18.dp))
+            .padding(vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         // Filter Carousel Title & Intensity Slider Row
         Row(
@@ -166,20 +168,20 @@ fun CapCutFilterBar(
                         .clip(RoundedCornerShape(12.dp))
                         .background(
                             when {
-                                isSelected -> DarkGlassCard
-                                else -> DarkGlassSurface.copy(alpha = 0.8f)
+                                isSelected -> CyberGold.copy(alpha = 0.30f)
+                                else -> Color.Black.copy(alpha = 0.45f)
                             }
                         )
                         .border(
-                            width = if (isSelected) 1.5.dp else 1.dp,
+                            width = if (isSelected) 1.8.dp else 1.dp,
                             color = when {
                                 isSelected -> CyberGold
-                                else -> DarkGlassBorder
+                                else -> Color.White.copy(alpha = 0.35f)
                             },
                             shape = RoundedCornerShape(12.dp)
                         )
                         .clickable { onFilterSelected(filter) }
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                        .padding(horizontal = 12.dp, vertical = 7.dp)
                 ) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,

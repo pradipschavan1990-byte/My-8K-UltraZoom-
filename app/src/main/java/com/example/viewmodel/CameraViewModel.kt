@@ -276,84 +276,104 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val filterIntensity = _uiState.value.capCutFilterIntensity
             val zoom = _uiState.value.currentZoom
 
-            val frameSupplier = sourceFrameSupplier ?: {
-                val resId = when {
-                    _uiState.value.activeMode == CameraMode.MACRO_2MP || _uiState.value.simulationSubjectIndex == 2 -> R.drawable.sample_macro
-                    _uiState.value.activeMode == CameraMode.ULTRA_WIDE_06X || _uiState.value.simulationSubjectIndex == 3 || _uiState.value.currentZoom <= 0.65f -> R.drawable.sample_ultrawide
-                    _uiState.value.activeMode == CameraMode.MOON_MODE || _uiState.value.simulationSubjectIndex == 1 -> R.drawable.sample_moon
-                    else -> R.drawable.sample_eagle
+            // Safe frame fetcher that ALWAYS executes PreviewView calls on the Android Main thread
+            val safeFrameFetcher: suspend () -> Bitmap = {
+                withContext(Dispatchers.Main) {
+                    try {
+                        val live = sourceFrameSupplier?.invoke()
+                        live ?: BitmapFactory.decodeResource(
+                            context.resources,
+                            when {
+                                _uiState.value.activeMode == CameraMode.MACRO_2MP || _uiState.value.simulationSubjectIndex == 2 -> R.drawable.sample_macro
+                                _uiState.value.activeMode == CameraMode.ULTRA_WIDE_06X || _uiState.value.simulationSubjectIndex == 3 || _uiState.value.currentZoom <= 0.65f -> R.drawable.sample_ultrawide
+                                _uiState.value.activeMode == CameraMode.MOON_MODE || _uiState.value.simulationSubjectIndex == 1 -> R.drawable.sample_moon
+                                else -> R.drawable.sample_eagle
+                            }
+                        )
+                    } catch (t: Throwable) {
+                        BitmapFactory.decodeResource(context.resources, R.drawable.sample_eagle)
+                    }
                 }
-                BitmapFactory.decodeResource(context.resources, resId)
             }
 
             videoJob = viewModelScope.launch(Dispatchers.IO) {
-                // Record video with VideoProcessingEngine
-                val videoPath = VideoProcessingEngine.recordFilteredVideoClip(
-                    context = context,
-                    baseFrameSupplier = frameSupplier,
-                    filter = currentFilter,
-                    filterIntensity = filterIntensity,
-                    zoomLevel = zoom,
-                    isRecordingPredicate = { isRecordingActive },
-                    onProgressUpdate = { sec ->
-                        _uiState.value = _uiState.value.copy(videoRecordingSeconds = sec)
-                    }
-                )
-
-                // Export video directly to device public MediaStore gallery (DCIM/UltraZoom8K)
-                val videoFile = File(videoPath)
-                MediaStorageHelper.exportVideoToGallery(
-                    context = context,
-                    sourceVideoFile = videoFile,
-                    filenamePrefix = "video_${currentFilter.id}",
-                    showToast = true
-                )
-
-                // Capture thumbnail
-                val base = frameSupplier()
-                val filteredThumb = CapCutFilterEngine.applyFilter(base, currentFilter, filterIntensity)
-                val thumbPath = FusionProcessingEngine.saveBitmapToFile(
-                    context = context,
-                    bitmap = filteredThumb,
-                    prefix = "video_thumb",
-                    exportToGallery = false
-                )
-
-                val duration = _uiState.value.videoRecordingSeconds.coerceAtLeast(1)
-                val tele = telemetry.value
-                val modeDesc = when (_uiState.value.activeMode) {
-                    CameraMode.MACRO_2MP -> "POCO X6 2MP Macro Video"
-                    CameraMode.ULTRA_WIDE_06X -> "POCO X6 8MP Ultra-Wide Video"
-                    CameraMode.POCO_64MP -> "POCO X6 64MP 4K Video"
-                    else -> "4K 10X Video"
-                }
-
-                val videoEntity = CapturedPhotoEntity(
-                    enhancedImagePath = thumbPath,
-                    rawImagePath = thumbPath,
-                    zoomLevel = zoom,
-                    estimatedDistance = tele.distanceDisplay,
-                    fusionFramesCount = duration * 24,
-                    captureMode = "$modeDesc (${currentFilter.displayName})",
-                    stabilityScore = tele.stabilityScore,
-                    hasDehaze = false,
-                    isMoonMode = _uiState.value.activeMode == CameraMode.MOON_MODE,
-                    title = "$modeDesc • ${currentFilter.displayName}",
-                    filterName = currentFilter.displayName,
-                    mediaType = "VIDEO",
-                    videoPath = videoPath,
-                    videoDurationSeconds = duration
-                )
-
-                val id = photoDao.insertPhoto(videoEntity)
-                val savedEntity = videoEntity.copy(id = id)
-
-                withContext(Dispatchers.Main) {
-                    _uiState.value = _uiState.value.copy(
-                        isRecordingVideo = false,
-                        lastCapturedPhoto = savedEntity,
-                        lastSavedVideoMessage = "व्हिडिओ गॅलरीमध्ये सेव्ह झाला! (DCIM/UltraZoom8K)"
+                try {
+                    // Record video with VideoProcessingEngine (YUV420 hardware buffers)
+                    val videoPath = VideoProcessingEngine.recordFilteredVideoClip(
+                        context = context,
+                        frameFetcher = safeFrameFetcher,
+                        filter = currentFilter,
+                        filterIntensity = filterIntensity,
+                        zoomLevel = zoom,
+                        isRecordingPredicate = { isRecordingActive },
+                        onProgressUpdate = { sec ->
+                            _uiState.value = _uiState.value.copy(videoRecordingSeconds = sec)
+                        }
                     )
+
+                    // Export video directly to device public MediaStore gallery (DCIM/UltraZoom8K)
+                    val videoFile = File(videoPath)
+                    MediaStorageHelper.exportVideoToGallery(
+                        context = context,
+                        sourceVideoFile = videoFile,
+                        filenamePrefix = "video_${currentFilter.id}",
+                        showToast = true
+                    )
+
+                    // Capture thumbnail
+                    val base = safeFrameFetcher()
+                    val filteredThumb = CapCutFilterEngine.applyFilter(base, currentFilter, filterIntensity)
+                    val thumbPath = FusionProcessingEngine.saveBitmapToFile(
+                        context = context,
+                        bitmap = filteredThumb,
+                        prefix = "video_thumb",
+                        exportToGallery = false
+                    )
+
+                    val duration = _uiState.value.videoRecordingSeconds.coerceAtLeast(1)
+                    val tele = telemetry.value
+                    val modeDesc = when (_uiState.value.activeMode) {
+                        CameraMode.MACRO_2MP -> "POCO X6 2MP Macro Video"
+                        CameraMode.ULTRA_WIDE_06X -> "POCO X6 8MP Ultra-Wide Video"
+                        CameraMode.POCO_64MP -> "POCO X6 64MP 4K Video"
+                        else -> "4K 10X Video"
+                    }
+
+                    val videoEntity = CapturedPhotoEntity(
+                        enhancedImagePath = thumbPath,
+                        rawImagePath = thumbPath,
+                        zoomLevel = zoom,
+                        estimatedDistance = tele.distanceDisplay,
+                        fusionFramesCount = duration * 20,
+                        captureMode = "$modeDesc (${currentFilter.displayName})",
+                        stabilityScore = tele.stabilityScore,
+                        hasDehaze = false,
+                        isMoonMode = _uiState.value.activeMode == CameraMode.MOON_MODE,
+                        title = "$modeDesc • ${currentFilter.displayName}",
+                        filterName = currentFilter.displayName,
+                        mediaType = "VIDEO",
+                        videoPath = videoPath,
+                        videoDurationSeconds = duration
+                    )
+
+                    val id = photoDao.insertPhoto(videoEntity)
+                    val savedEntity = videoEntity.copy(id = id)
+
+                    withContext(Dispatchers.Main) {
+                        _uiState.value = _uiState.value.copy(
+                            isRecordingVideo = false,
+                            lastCapturedPhoto = savedEntity,
+                            lastSavedVideoMessage = "व्हिडिओ गॅलरीमध्ये सेव्ह झाला! (DCIM/UltraZoom8K)"
+                        )
+                    }
+                } catch (e: Throwable) {
+                    android.util.Log.e("CameraViewModel", "Video recording pipeline error", e)
+                    withContext(Dispatchers.Main) {
+                        _uiState.value = _uiState.value.copy(
+                            isRecordingVideo = false,
+                            lastSavedVideoMessage = "व्हिडिओ सेव्ह करताना त्रुटी आली, कृपया पुन्हा प्रयत्न करा"
+                        )
+                    }
                 }
             }
         }
